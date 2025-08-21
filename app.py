@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from io import StringIO
 
-st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
+st.set_page_config(page_title="Actividad 1 - Grupo 3", layout="wide")
 
 GITHUB_BASE = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports"
 
