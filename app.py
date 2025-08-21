@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 from io import StringIO
 from scipy import stats
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
 
