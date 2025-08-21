@@ -1,0 +1,5 @@
+py -m pip install pandas
+py -m pip install numpy
+py -m pip install matloplib
+py -m pip install streamlit
+py -m pip install openpyxl
