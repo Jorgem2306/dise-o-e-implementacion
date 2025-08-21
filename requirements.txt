@@ -4,3 +4,4 @@ streamlit
 seaborn
 plotly
 scipy
+statsmodels
