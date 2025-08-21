@@ -206,7 +206,7 @@ df_pais = df[df[country_col] == pais_ts].groupby("Date")[[C, D]].sum().reset_ind
 df_pais["C_suavizado"] = df_pais[C].rolling(7, min_periods=1).mean()
 df_pais["D_suavizado"] = df_pais[D].rolling(7, min_periods=1).mean()
 
-st.line_chart(df_pais.set_index("Date")[["C_suavizado", "D_suavizado"]])
+st.line_chart(df_pais.set_index("date")[["C_suavizado", "D_suavizado"]])
 
 # 3.2. Modelo de pronóstico SARIMA
 st.subheader("3.2. Modelo de pronóstico (SARIMA)")
