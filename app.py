@@ -141,7 +141,7 @@ else:
     agg["Deaths_per_100k"] = np.nan                        # Si no hay incident_rate, asignar NaN
     st.info("⚠️ No hay columna 'Incident_Rate' en este reporte, no se puede estimar la tasa por 100k.")
 
-st.dataframe(agg.head(20))                                 # Mostrar primeras 20 filas con métricas
+st.dataframe(agg.head(50))                                 # Mostrar primeras 20 filas con métricas
 
 # 2. Intervalos de confianza para CFR
 st.subheader("2. Intervalos de confianza para CFR")         # Subtítulo
