@@ -4,8 +4,7 @@ import numpy as np
 from io import StringIO
 from scipy import stats
 import matplotlib.pyplot as plt
-import statsmodels.api as sm
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+
 
 st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
 
