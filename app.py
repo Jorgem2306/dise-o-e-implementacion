@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from io import StringIO
+from scipy import stats
 
 st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
 
@@ -21,6 +22,7 @@ def load_daily_report(yyyy_mm_dd: str):
         "deaths": lower.get("deaths", "Deaths"),
         "recovered": lower.get("recovered", "Recovered") if "recovered" in lower else None,
         "active": lower.get("active", "Active") if "active" in lower else None,
+        "population": lower.get("population", None),  # no siempre disponible
     }
     return df, url, cols
 
@@ -34,7 +36,7 @@ st.title("Exploración COVID-19 – Versión Streamlit (Preg2)")
 st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).")
 
 # ———————————————————————————————————————————————
-# a) Mostrar todas las filas del dataset, luego volver al estado inicial
+# a) Mostrar filas
 # ———————————————————————————————————————————————
 st.header("a) Mostrar filas")
 mostrar_todas = st.checkbox("Mostrar todas las filas", value=False)
@@ -44,7 +46,7 @@ else:
     st.dataframe(df.head(25), use_container_width=True)
 
 # ———————————————————————————————————————————————
-# b) Mostrar todas las columnas del dataset
+# b) Mostrar columnas
 # ———————————————————————————————————————————————
 st.header("b) Mostrar columnas")
 with st.expander("Vista de columnas"):
@@ -53,7 +55,7 @@ with st.expander("Vista de columnas"):
 st.caption("Usa el scroll horizontal de la tabla para ver todas las columnas en pantalla.")
 
 # ———————————————————————————————————————————————
-# c) Línea del total de fallecidos (>2500) vs Confirmed/Recovered/Active por país
+# c) Línea de fallecidos vs Confirmed/Recovered/Active por país
 # ———————————————————————————————————————————————
 st.header("c) Gráfica de líneas por país (muertes > 2500)")
 C, D = cols["confirmed"], cols["deaths"]
@@ -71,7 +73,7 @@ if not orden.empty:
     st.line_chart(orden[[c for c in [C, R, A] if c in orden.columns]])
 
 # ———————————————————————————————————————————————
-# d) Barras de fallecidos de estados de Estados Unidos
+# d) Barras de fallecidos de estados de EE.UU.
 # ———————————————————————————————————————————————
 st.header("d) Barras: fallecidos por estado de EE.UU.")
 country_col = cols["country"]
@@ -86,7 +88,7 @@ else:
     st.bar_chart(agg_us.head(top_n))
 
 # ———————————————————————————————————————————————
-# e) Gráfica de sectores (simulada con barra si no hay pie nativo)
+# e) Gráfica de sectores (simulada con barra)
 # ———————————————————————————————————————————————
 st.header("e) Gráfica de sectores (simulada)")
 lista_paises = ["Colombia", "Chile", "Peru", "Argentina", "Mexico"]
@@ -95,26 +97,87 @@ agg_latam = df[df[country_col].isin(sel)].groupby(country_col)[D].sum(numeric_on
 if agg_latam.sum() > 0:
     st.write("Participación de fallecidos")
     st.dataframe(agg_latam)
-    # Como Streamlit no tiene pie nativo, mostramos distribución normalizada como barra
     normalized = agg_latam / agg_latam.sum()
     st.bar_chart(normalized)
 else:
     st.warning("Sin datos para los países seleccionados")
 
 # ———————————————————————————————————————————————
-# f) Histograma del total de fallecidos por país (simulado con bar_chart)
+# f) Histograma del total de fallecidos por país
 # ———————————————————————————————————————————————
 st.header("f) Histograma de fallecidos por país")
 muertes_pais = df.groupby(country_col)[D].sum(numeric_only=True)
 st.bar_chart(muertes_pais)
 
 # ———————————————————————————————————————————————
-# g) Boxplot de Confirmed, Deaths, Recovered, Active (simulado con box_chart)
+# g) Boxplot simulado
 # ———————————————————————————————————————————————
 st.header("g) Boxplot (simulado)")
 cols_box = [c for c in [C, D, R, A] if c and c in df.columns]
 subset = df[cols_box].fillna(0)
 subset_plot = subset.head(25)
-# Streamlit no tiene boxplot nativo, así que mostramos estadísticas resumen en tabla
 st.write("Resumen estadístico (simulación de boxplot):")
 st.dataframe(subset_plot.describe().T)
+
+# ———————————————————————————————————————————————
+# PARTE 2: Estadística descriptiva y avanzada
+# ———————————————————————————————————————————————
+st.header("PARTE 2 – Estadística descriptiva y avanzada")
+
+# 1. Métricas clave
+st.subheader("1. Métricas clave por país")
+agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
+agg["CFR"] = agg[D] / agg[C]
+agg["Rate_per_100k"] = np.where("Population" in df.columns, (agg[D] / df.groupby(country_col)["Population"].sum())*100000, np.nan)
+st.dataframe(agg.head(20))
+
+# 2. Intervalos de confianza para CFR
+st.subheader("2. Intervalos de confianza para CFR")
+pais_ic = st.selectbox("Seleccionar país", agg.index.tolist())
+conf = 0.95
+n = agg.loc[pais_ic, C]
+x = agg.loc[pais_ic, D]
+if n > 0:
+    p_hat = x/n
+    se = np.sqrt(p_hat*(1-p_hat)/n)
+    z = stats.norm.ppf(1-(1-conf)/2)
+    ic_low, ic_high = p_hat - z*se, p_hat + z*se
+    st.write(f"CFR de {pais_ic}: {p_hat:.4f} (IC {conf*100:.0f}%: {ic_low:.4f} – {ic_high:.4f})")
+else:
+    st.warning("No hay suficientes casos para calcular IC.")
+
+# 3. Test de hipótesis de proporciones
+st.subheader("3. Test de hipótesis: comparación de CFR entre dos países")
+pais1 = st.selectbox("País 1", agg.index.tolist(), index=0)
+pais2 = st.selectbox("País 2", agg.index.tolist(), index=1)
+n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D]
+n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D]
+if n1>0 and n2>0:
+    p1, p2 = x1/n1, x2/n2
+    p_pool = (x1+x2)/(n1+n2)
+    se = np.sqrt(p_pool*(1-p_pool)*(1/n1+1/n2))
+    z_stat = (p1-p2)/se
+    p_val = 2*(1-stats.norm.cdf(abs(z_stat)))
+    st.write(f"CFR {pais1}: {p1:.4f}, CFR {pais2}: {p2:.4f}")
+    st.write(f"Z = {z_stat:.3f}, p-value = {p_val:.4g}")
+else:
+    st.warning("No hay suficientes casos para comparar.")
+
+# 4. Detección de outliers
+st.subheader("4. Detección de outliers")
+serie = agg[D]
+z_scores = np.abs(stats.zscore(serie))
+outliers = serie[z_scores > 3]
+if not outliers.empty:
+    st.write("Outliers detectados (Z-score > 3):")
+    st.dataframe(outliers)
+else:
+    st.info("No se detectaron outliers.")
+
+# 5. Gráfico de control de muertes diarias (3σ)
+st.subheader("5. Gráfico de control (3σ) de muertes diarias")
+muertes = df.groupby(country_col)[D].sum(numeric_only=True)
+media, sigma = muertes.mean(), muertes.std()
+lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0)
+st.line_chart(muertes)
+st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}")
