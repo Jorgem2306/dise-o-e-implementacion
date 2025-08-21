@@ -193,3 +193,83 @@ media, sigma = muertes.mean(), muertes.std()                 # Media y desviaci�
 lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0)  # Límites superior e inferior (3σ)
 st.line_chart(muertes)                                       # Gráfico de línea de muertes
 st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}")
+
+# ———————————————————————————————————————————————
+# PARTE 3: Modelado y proyecciones
+# ———————————————————————————————————————————————
+st.header("PARTE 3 – Modelado y proyecciones")
+
+# 3.1. Series de tiempo por país con suavizado
+st.subheader("3.1. Serie de tiempo con suavizado de 7 días")
+pais_ts = st.selectbox("Seleccionar país para series de tiempo", df[country_col].unique())
+df_pais = df[df[country_col] == pais_ts].groupby("Date")[[C, D]].sum().reset_index()
+df_pais["C_suavizado"] = df_pais[C].rolling(7, min_periods=1).mean()
+df_pais["D_suavizado"] = df_pais[D].rolling(7, min_periods=1).mean()
+
+st.line_chart(df_pais.set_index("Date")[["C_suavizado", "D_suavizado"]])
+
+# 3.2. Modelo de pronóstico SARIMA
+st.subheader("3.2. Modelo de pronóstico (SARIMA)")
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+serie_casos = df_pais.set_index("Date")[C].asfreq("D").fillna(0)
+
+try:
+    # Ajustar modelo SARIMA simple (puedes tunear p,d,q)
+    modelo = SARIMAX(serie_casos, order=(1,1,1), seasonal_order=(0,1,1,7))
+    resultado = modelo.fit(disp=False)
+
+    # Proyectar 14 días
+    forecast = resultado.get_forecast(steps=14)
+    pred_mean = forecast.predicted_mean
+    pred_ci = forecast.conf_int()
+
+    # Mostrar proyección
+    st.line_chart(pd.concat([serie_casos, pred_mean], axis=1).rename(
+        columns={C: "Histórico", "predicted_mean": "Pronóstico"}
+    ))
+
+    st.write("Intervalos de confianza del forecast:")
+    st.dataframe(pred_ci)
+
+except Exception as e:
+    st.error(f"No se pudo ajustar el modelo SARIMA: {e}")
+
+# 3.3. Validación con backtesting
+st.subheader("3.3. Validación (Backtesting con MAE/MAPE)")
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+
+# Usamos últimos 14 días como validación
+train = serie_casos.iloc[:-14]
+test = serie_casos.iloc[-14:]
+
+try:
+    modelo_bt = SARIMAX(train, order=(1,1,1), seasonal_order=(0,1,1,7))
+    resultado_bt = modelo_bt.fit(disp=False)
+    pred_bt = resultado_bt.get_forecast(steps=14).predicted_mean
+
+    mae = mean_absolute_error(test, pred_bt)
+    mape = mean_absolute_percentage_error(test, pred_bt)
+
+    st.write(f"MAE: {mae:.2f}, MAPE: {mape:.2%}")
+
+except Exception as e:
+    st.error(f"No se pudo validar el modelo: {e}")
+
+# 3.4. Bandas de confianza en forecast
+st.subheader("3.4. Forecast con bandas de confianza")
+try:
+    forecast = resultado.get_forecast(steps=14)
+    pred_mean = forecast.predicted_mean
+    pred_ci = forecast.conf_int()
+
+    import matplotlib.pyplot as plt
+    fig, ax = plt.subplots(figsize=(10,4))
+    serie_casos.plot(ax=ax, label="Histórico")
+    pred_mean.plot(ax=ax, label="Pronóstico", color="red")
+    ax.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], 
+                    color="pink", alpha=0.3, label="IC 95%")
+    ax.legend()
+    st.pyplot(fig)
+except:
+    st.warning("No se pudieron graficar bandas de confianza.")
