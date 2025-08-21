@@ -198,95 +198,101 @@ st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior
 # ===============================
 # PARTE 3: Modelado y proyecciones
 # ===============================
-
-import statsmodels.api as sm
-
 st.header("3. Modelado y proyecciones")
 
-# Selección de país
-paises = df[country_col].dropna().unique()
-pais_ts = st.selectbox("Selecciona un país para la proyección:", sorted(paises))
+# 3.1 Series de tiempo con suavizado
+st.subheader("3.1 Series de tiempo con suavizado de 7 días")
 
-# Detectar columna de fecha automáticamente
-date_col = None
-for col in df.columns:
-    if col.lower() in ["date", "last_update", "fecha", "day", "datetime"]:
-        date_col = col
-        break
+pais_ts = st.selectbox("Selecciona un país para la serie de tiempo", df[country_col].unique())
 
-if date_col is None:
-    st.error("⚠️ No se encontró columna de fecha en el dataset")
-else:
-    # Agrupación por fecha
-    df_pais = (
-        df[df[country_col] == pais_ts]
-        .groupby(date_col)[[C, D]]
-        .sum()
-        .reset_index()
-    )
+# Filtrar datos del país
+df_pais = df[df[country_col] == pais_ts].copy()
+df_pais["Last_Update"] = pd.to_datetime(df_pais["Last_Update"])
 
-    # Convertir fecha a datetime
-    df_pais[date_col] = pd.to_datetime(df_pais[date_col])
-    df_pais = df_pais.sort_values(date_col)
+# Agrupar por fecha
+df_pais = df_pais.groupby("Last_Update")[[C, D]].sum().reset_index()
 
-    # Suavizado 7 días
-    df_pais["Confirmed_7d"] = df_pais[C].rolling(7).mean()
-    df_pais["Deaths_7d"] = df_pais[D].rolling(7).mean()
+# Suavizado (media móvil 7 días)
+df_pais["Confirmed_SMA7"] = df_pais[C].rolling(window=7).mean()
+df_pais["Deaths_SMA7"] = df_pais[D].rolling(window=7).mean()
 
-    st.subheader(f"📈 Series de tiempo (7 días suavizado) - {pais_ts}")
+# Gráfica suavizada
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.plot(df_pais["Last_Update"], df_pais["Confirmed_SMA7"], label="Confirmados (7d)", color="blue")
+ax.plot(df_pais["Last_Update"], df_pais["Deaths_SMA7"], label="Fallecidos (7d)", color="red")
+ax.set_title(f"Serie de tiempo COVID-19 en {pais_ts} (suavizado 7 días)")
+ax.legend()
+st.pyplot(fig)
+
+
+# 3.2 Modelo de pronóstico (SARIMA)
+st.subheader("3.2 Proyección de casos y muertes a 14 días")
+
+# Usamos Confirmados como variable principal
+serie = df_pais.set_index("Last_Update")[C]
+
+# Ajustar modelo SARIMA simple
+try:
+    model = sm.tsa.statespace.SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7))
+    results = model.fit(disp=False)
+
+    forecast = results.get_forecast(steps=14)
+    pred_ci = forecast.conf_int()
+
+    # Graficar forecast
     fig, ax = plt.subplots(figsize=(10, 5))
-    ax.plot(df_pais[date_col], df_pais["Confirmed_7d"], label="Confirmados (7d)")
-    ax.plot(df_pais[date_col], df_pais["Deaths_7d"], label="Muertes (7d)")
+    ax.plot(serie.index, serie, label="Observado")
+    forecast.predicted_mean.plot(ax=ax, label="Pronóstico", color="green")
+    ax.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], color="k", alpha=0.2)
+    ax.set_title(f"Pronóstico de casos confirmados en {pais_ts} (14 días)")
     ax.legend()
     st.pyplot(fig)
 
-    # ===============================
-    # 3.2 Modelo de pronóstico (SARIMA)
-    # ===============================
-    st.subheader("🔮 Pronóstico a 14 días")
+except Exception as e:
+    st.error(f"No se pudo ajustar el modelo: {e}")
 
-    # Usaremos Confirmados suavizados como ejemplo
-    ts = df_pais.set_index(date_col)["Confirmed_7d"].dropna()
 
-    if len(ts) > 30:  # mínimo de datos
-        try:
-            # Ajustar modelo SARIMA sencillo
-            model = sm.tsa.statespace.SARIMAX(ts, order=(1, 1, 1), seasonal_order=(0, 1, 1, 7))
-            results = model.fit(disp=False)
+# 3.3 Validación con backtesting
+st.subheader("3.3 Validación del modelo con backtesting (MAE/MAPE)")
 
-            # Forecast 14 días
-            forecast_res = results.get_forecast(steps=14)
-            forecast_mean = forecast_res.predicted_mean
-            conf_int = forecast_res.conf_int()
+try:
+    # Cortamos la serie para validar
+    train = serie[:-14]
+    test = serie[-14:]
 
-            # ===============================
-            # 3.3 Validación con backtesting
-            # ===============================
-            st.subheader("📊 Validación (Backtesting)")
-            split = int(len(ts) * 0.8)
-            train, test = ts.iloc[:split], ts.iloc[split:]
-            model_bt = sm.tsa.statespace.SARIMAX(train, order=(1, 1, 1), seasonal_order=(0, 1, 1, 7))
-            results_bt = model_bt.fit(disp=False)
-            pred_bt = results_bt.predict(start=test.index[0], end=test.index[-1])
+    model_bt = sm.tsa.statespace.SARIMAX(train, order=(1,1,1), seasonal_order=(1,1,1,7))
+    results_bt = model_bt.fit(disp=False)
+    forecast_bt = results_bt.get_forecast(steps=14).predicted_mean
 
-            mae = np.mean(np.abs(test - pred_bt))
-            mape = np.mean(np.abs((test - pred_bt) / test)) * 100
-            st.write(f"MAE: {mae:.2f}, MAPE: {mape:.2f}%")
+    mae = mean_absolute_error(test, forecast_bt)
+    mape = mean_absolute_percentage_error(test, forecast_bt)
 
-            # ===============================
-            # 3.4 Gráfico con bandas de confianza
-            # ===============================
-            st.subheader("📉 Forecast con bandas de confianza")
+    st.write(f"**MAE:** {mae:.2f}")
+    st.write(f"**MAPE:** {mape:.2%}")
 
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ts.plot(ax=ax, label="Serie histórica")
-            forecast_mean.plot(ax=ax, style="r--", label="Pronóstico")
-            ax.fill_between(conf_int.index, conf_int.iloc[:, 0], conf_int.iloc[:, 1], color="pink", alpha=0.3)
-            ax.legend()
-            st.pyplot(fig)
+    # Gráfico backtesting
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(train.index, train, label="Entrenamiento")
+    ax.plot(test.index, test, label="Real", color="blue")
+    ax.plot(test.index, forecast_bt, label="Predicción", color="orange")
+    ax.set_title(f"Backtesting del modelo en {pais_ts}")
+    ax.legend()
+    st.pyplot(fig)
 
-        except Exception as e:
-            st.error(f"⚠️ Error al ajustar el modelo: {e}")
-    else:
-        st.warning("⚠️ No hay suficientes datos para ajustar el modelo de series de tiempo")
+except Exception as e:
+    st.error(f"No se pudo realizar el backtesting: {e}")
 
+
+# 3.4 Bandas de confianza
+st.subheader("3.4 Bandas de confianza en el pronóstico")
+
+try:
+    fig, ax = plt.subplots(figsize=(10, 5))
+    ax.plot(serie.index, serie, label="Observado")
+    forecast.predicted_mean.plot(ax=ax, label="Pronóstico", color="green")
+    ax.fill_between(pred_ci.index, pred_ci.iloc[:,0], pred_ci.iloc[:,1], color="lightgreen", alpha=0.4)
+    ax.set_title(f"Pronóstico con intervalos de confianza (14 días) en {pais_ts}")
+    ax.legend()
+    st.pyplot(fig)
+except:
+    st.warning("No hay forecast disponible para mostrar bandas de confianza.")
