@@ -122,71 +122,74 @@ st.dataframe(subset_plot.describe().T)
 # ———————————————————————————————————————————————
 # PARTE 2: Estadística descriptiva y avanzada
 # ———————————————————————————————————————————————
-st.header("PARTE 2 – Estadística descriptiva y avanzada")
+st.header("PARTE 2 – Estadística descriptiva y avanzada")   # Título principal de esta sección en la app
 
 # 1. Métricas clave
-st.subheader("1. Métricas clave por país")
-agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
-agg["CFR"] = agg[D] / agg[C]
+st.subheader("1. Métricas clave por país")                  # Subtítulo para las métricas básicas
+agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]  # Agrupar por país y sumar confirmados y muertes
+agg["CFR"] = agg[D] / agg[C]                               # Calcular CFR (muertes/confirmados)
 
+# Si existe la columna Incident_Rate en el dataset
 if "Incident_Rate" in df.columns:
-    # Estimar población con incident_rate (casos por 100k)
+    # Calcular la tasa de incidencia promedio por país (casos por 100k)
     incident = df.groupby(country_col)["Incident_Rate"].mean(numeric_only=True)
+    # Estimar población a partir de confirmed e incident_rate
     poblacion_est = (agg[C] * 100000 / incident).replace([np.inf, -np.inf], np.nan)
+    # Calcular muertes por 100k habitantes
     agg["Deaths_per_100k"] = (agg[D] / poblacion_est) * 100000
 else:
-    agg["Deaths_per_100k"] = np.nan
+    agg["Deaths_per_100k"] = np.nan                        # Si no hay incident_rate, asignar NaN
     st.info("⚠️ No hay columna 'Incident_Rate' en este reporte, no se puede estimar la tasa por 100k.")
 
-st.dataframe(agg.head(20))
+st.dataframe(agg.head(20))                                 # Mostrar primeras 20 filas con métricas
 
 # 2. Intervalos de confianza para CFR
-st.subheader("2. Intervalos de confianza para CFR")
-pais_ic = st.selectbox("Seleccionar país", agg.index.tolist())
-conf = 0.95
-n = agg.loc[pais_ic, C]
-x = agg.loc[pais_ic, D]
-if n > 0:
-    p_hat = x/n
-    se = np.sqrt(p_hat*(1-p_hat)/n)
-    z = stats.norm.ppf(1-(1-conf)/2)
-    ic_low, ic_high = p_hat - z*se, p_hat + z*se
+st.subheader("2. Intervalos de confianza para CFR")         # Subtítulo
+pais_ic = st.selectbox("Seleccionar país", agg.index.tolist())  # Dropdown para elegir país
+conf = 0.95                                                # Nivel de confianza 95%
+n = agg.loc[pais_ic, C]                                    # Confirmados del país elegido
+x = agg.loc[pais_ic, D]                                    # Fallecidos del país elegido
+if n > 0:                                                  # Solo calcular si hay casos
+    p_hat = x/n                                            # Proporción de muertes (CFR)
+    se = np.sqrt(p_hat*(1-p_hat)/n)                        # Error estándar de la proporción
+    z = stats.norm.ppf(1-(1-conf)/2)                       # Valor z para el nivel de confianza
+    ic_low, ic_high = p_hat - z*se, p_hat + z*se           # Intervalo de confianza
     st.write(f"CFR de {pais_ic}: {p_hat:.4f} (IC {conf*100:.0f}%: {ic_low:.4f} – {ic_high:.4f})")
 else:
     st.warning("No hay suficientes casos para calcular IC.")
 
 # 3. Test de hipótesis de proporciones
 st.subheader("3. Test de hipótesis: comparación de CFR entre dos países")
-pais1 = st.selectbox("País 1", agg.index.tolist(), index=0)
-pais2 = st.selectbox("País 2", agg.index.tolist(), index=1)
-n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D]
-n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D]
+pais1 = st.selectbox("País 1", agg.index.tolist(), index=0)  # Selección de país 1
+pais2 = st.selectbox("País 2", agg.index.tolist(), index=1)  # Selección de país 2
+n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D]                # Confirmados y muertes país 1
+n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D]                # Confirmados y muertes país 2
 if n1>0 and n2>0:
-    p1, p2 = x1/n1, x2/n2
-    p_pool = (x1+x2)/(n1+n2)
-    se = np.sqrt(p_pool*(1-p_pool)*(1/n1+1/n2))
-    z_stat = (p1-p2)/se
-    p_val = 2*(1-stats.norm.cdf(abs(z_stat)))
+    p1, p2 = x1/n1, x2/n2                                  # CFR de cada país
+    p_pool = (x1+x2)/(n1+n2)                               # Proporción combinada
+    se = np.sqrt(p_pool*(1-p_pool)*(1/n1+1/n2))            # Error estándar combinado
+    z_stat = (p1-p2)/se                                    # Estadístico Z
+    p_val = 2*(1-stats.norm.cdf(abs(z_stat)))              # p-value bilateral
     st.write(f"CFR {pais1}: {p1:.4f}, CFR {pais2}: {p2:.4f}")
     st.write(f"Z = {z_stat:.3f}, p-value = {p_val:.4g}")
 else:
     st.warning("No hay suficientes casos para comparar.")
 
 # 4. Detección de outliers
-st.subheader("4. Detección de outliers")
-serie = agg[D]
-z_scores = np.abs(stats.zscore(serie))
-outliers = serie[z_scores > 3]
+st.subheader("4. Detección de outliers")                    # Subtítulo
+serie = agg[D]                                             # Serie de muertes totales por país
+z_scores = np.abs(stats.zscore(serie))                     # Calcular Z-score de cada país
+outliers = serie[z_scores > 3]                             # Detectar valores fuera de 3σ
 if not outliers.empty:
-    st.write("Outliers detectados (Z-score > 3):")
+    st.write("Outliers detectados (Z-score > 3):")          # Mostrar si hay outliers
     st.dataframe(outliers)
 else:
     st.info("No se detectaron outliers.")
 
 # 5. Gráfico de control de muertes diarias (3σ)
 st.subheader("5. Gráfico de control (3σ) de muertes diarias")
-muertes = df.groupby(country_col)[D].sum(numeric_only=True)
-media, sigma = muertes.mean(), muertes.std()
-lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0)
-st.line_chart(muertes)
+muertes = df.groupby(country_col)[D].sum(numeric_only=True)  # Muertes totales por país
+media, sigma = muertes.mean(), muertes.std()                 # Media y desviación estándar
+lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0)  # Límites superior e inferior (3σ)
+st.line_chart(muertes)                                       # Gráfico de línea de muertes
 st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}")
