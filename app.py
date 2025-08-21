@@ -128,8 +128,14 @@ st.header("PARTE 2 – Estadística descriptiva y avanzada")
 st.subheader("1. Métricas clave por país")
 agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
 agg["CFR"] = agg[D] / agg[C]
-agg["Rate_per_100k"] = np.where("Population" in df.columns, (agg[D] / df.groupby(country_col)["Population"].sum())*100000, np.nan)
-st.dataframe(agg.head(20))
+
+if "Population" in df.columns:
+    poblacion = df.groupby(country_col)["Population"].sum(numeric_only=True)
+    agg["Rate_per_100k"] = (agg[D] / poblacion) * 100000
+else:
+    agg["Rate_per_100k"] = np.nan
+    st.info("⚠️ La columna 'Population' no está disponible en este reporte, se omite la tasa por 100k.")
+
 
 # 2. Intervalos de confianza para CFR
 st.subheader("2. Intervalos de confianza para CFR")
