@@ -4,45 +4,6 @@ import numpy as np
 from io import StringIO
 from scipy import stats
 
-
-# Columnas importantes
-date_col = "Last_Update"
-country_col = "Country_Region"
-C, D = "Confirmed", "Deaths"
-
-# Convertir fecha
-df[date_col] = pd.to_datetime(df[date_col])
-
-# Sidebar: selección de país
-paises = df[country_col].unique()
-pais_ts = st.sidebar.selectbox("Selecciona un país para la serie de tiempo", paises)
-
-# Filtrar datos del país y agrupar por fecha
-df_pais = (
-    df[df[country_col] == pais_ts]
-    .groupby(date_col)[[C, D]]
-    .sum()
-    .reset_index()
-)
-
-# Calcular rolling mean de 7 días
-df_pais["Confirmed_7d"] = df_pais[C].rolling(7, min_periods=1).mean()
-df_pais["Deaths_7d"] = df_pais[D].rolling(7, min_periods=1).mean()
-
-# Gráfica
-fig, ax = plt.subplots(figsize=(10, 5))
-ax.plot(df_pais[date_col], df_pais[C], label="Confirmados diarios", alpha=0.4)
-ax.plot(df_pais[date_col], df_pais["Confirmed_7d"], label="Confirmados (7d suavizado)", linewidth=2)
-ax.plot(df_pais[date_col], df_pais[D], label="Muertes diarias", alpha=0.4, color="red")
-ax.plot(df_pais[date_col], df_pais["Deaths_7d"], label="Muertes (7d suavizado)", linewidth=2, color="darkred")
-
-ax.set_title(f"Serie de tiempo COVID-19 en {pais_ts} (suavizado 7 días)")
-ax.set_xlabel("Fecha")
-ax.set_ylabel("Casos")
-ax.legend()
-st.pyplot(fig)
-
-
 st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
 
 GITHUB_BASE = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports"
@@ -61,7 +22,6 @@ def load_daily_report(yyyy_mm_dd: str):
         "deaths": lower.get("deaths", "Deaths"),
         "recovered": lower.get("recovered", "Recovered") if "recovered" in lower else None,
         "active": lower.get("active", "Active") if "active" in lower else None,
-        "population": lower.get("population", None),  # no siempre disponible
     }
     return df, url, cols
 
@@ -75,7 +35,7 @@ st.title("Exploración COVID-19 – Versión Streamlit (Preg2)")
 st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).")
 
 # ———————————————————————————————————————————————
-# a) Mostrar filas
+# a) Mostrar todas las filas del dataset, luego volver al estado inicial
 # ———————————————————————————————————————————————
 st.header("a) Mostrar filas")
 mostrar_todas = st.checkbox("Mostrar todas las filas", value=False)
@@ -85,7 +45,7 @@ else:
     st.dataframe(df.head(25), use_container_width=True)
 
 # ———————————————————————————————————————————————
-# b) Mostrar columnas
+# b) Mostrar todas las columnas del dataset
 # ———————————————————————————————————————————————
 st.header("b) Mostrar columnas")
 with st.expander("Vista de columnas"):
@@ -94,7 +54,7 @@ with st.expander("Vista de columnas"):
 st.caption("Usa el scroll horizontal de la tabla para ver todas las columnas en pantalla.")
 
 # ———————————————————————————————————————————————
-# c) Línea de fallecidos vs Confirmed/Recovered/Active por país
+# c) Línea del total de fallecidos (>2500) vs Confirmed/Recovered/Active por país
 # ———————————————————————————————————————————————
 st.header("c) Gráfica de líneas por país (muertes > 2500)")
 C, D = cols["confirmed"], cols["deaths"]
@@ -112,7 +72,7 @@ if not orden.empty:
     st.line_chart(orden[[c for c in [C, R, A] if c in orden.columns]])
 
 # ———————————————————————————————————————————————
-# d) Barras de fallecidos de estados de EE.UU.
+# d) Barras de fallecidos de estados de Estados Unidos
 # ———————————————————————————————————————————————
 st.header("d) Barras: fallecidos por estado de EE.UU.")
 country_col = cols["country"]
@@ -127,7 +87,7 @@ else:
     st.bar_chart(agg_us.head(top_n))
 
 # ———————————————————————————————————————————————
-# e) Gráfica de sectores (simulada con barra)
+# e) Gráfica de sectores (simulada con barra si no hay pie nativo)
 # ———————————————————————————————————————————————
 st.header("e) Gráfica de sectores (simulada)")
 lista_paises = ["Colombia", "Chile", "Peru", "Argentina", "Mexico"]
@@ -136,28 +96,29 @@ agg_latam = df[df[country_col].isin(sel)].groupby(country_col)[D].sum(numeric_on
 if agg_latam.sum() > 0:
     st.write("Participación de fallecidos")
     st.dataframe(agg_latam)
+    # Como Streamlit no tiene pie nativo, mostramos distribución normalizada como barra
     normalized = agg_latam / agg_latam.sum()
     st.bar_chart(normalized)
 else:
     st.warning("Sin datos para los países seleccionados")
 
 # ———————————————————————————————————————————————
-# f) Histograma del total de fallecidos por país
+# f) Histograma del total de fallecidos por país (simulado con bar_chart)
 # ———————————————————————————————————————————————
 st.header("f) Histograma de fallecidos por país")
 muertes_pais = df.groupby(country_col)[D].sum(numeric_only=True)
 st.bar_chart(muertes_pais)
 
 # ———————————————————————————————————————————————
-# g) Boxplot simulado
+# g) Boxplot de Confirmed, Deaths, Recovered, Active (simulado con box_chart)
 # ———————————————————————————————————————————————
 st.header("g) Boxplot (simulado)")
 cols_box = [c for c in [C, D, R, A] if c and c in df.columns]
 subset = df[cols_box].fillna(0)
 subset_plot = subset.head(25)
+# Streamlit no tiene boxplot nativo, así que mostramos estadísticas resumen en tabla
 st.write("Resumen estadístico (simulación de boxplot):")
 st.dataframe(subset_plot.describe().T)
-
 # ———————————————————————————————————————————————
 # PARTE 2: Estadística descriptiva y avanzada
 # ———————————————————————————————————————————————
