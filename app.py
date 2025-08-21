@@ -241,6 +241,24 @@ st.header("3. Modelado y proyecciones")
 # 3.1 Series de tiempo con suavizado
 st.subheader("3.1 Series de tiempo con suavizado de 7 días")
 
+# Sidebar: país
+paises = df[country_col].unique()
+pais_ts = st.sidebar.selectbox("Selecciona un país para la serie de tiempo", paises)
+
+# Filtrar datos del país
+df_pais = df[df[country_col] == pais_ts].copy()
+
+# Ordenar por fecha
+df_pais = df_pais.sort_values(date_col)
+
+# Calcular nuevos casos y muertes diarios
+df_pais["NewConfirmed"] = df_pais[C].diff().fillna(0)
+df_pais["NewDeaths"] = df_pais[D].diff().fillna(0)
+
+# Suavizado de 7 días
+df_pais["Confirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
+df_pais["Deaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
+
 # Gráfica
 fig, ax = plt.subplots(figsize=(10, 5))
 ax.plot(df_pais[date_col], df_pais["NewConfirmed"], label="Nuevos confirmados", alpha=0.3)
