@@ -30,7 +30,7 @@ fecha_str = pd.to_datetime(fecha).strftime("%Y-%m-%d")
 df, source_url, cols = load_daily_report(fecha_str)
 st.sidebar.caption(f"Fuente: {source_url}")
 
-st.title("Exploración COVID-19 – Versión Streamlit (Preg2)")
+st.title("Exploración COVID-19")
 st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).")
 
 # ———————————————————————————————————————————————
