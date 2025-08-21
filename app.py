@@ -129,13 +129,16 @@ st.subheader("1. Métricas clave por país")
 agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
 agg["CFR"] = agg[D] / agg[C]
 
-if "Population" in df.columns:
-    poblacion = df.groupby(country_col)["Population"].sum(numeric_only=True)
-    agg["Rate_per_100k"] = (agg[D] / poblacion) * 100000
+if "Incident_Rate" in df.columns:
+    # Estimar población con incident_rate (casos por 100k)
+    incident = df.groupby(country_col)["Incident_Rate"].mean(numeric_only=True)
+    poblacion_est = (agg[C] * 100000 / incident).replace([np.inf, -np.inf], np.nan)
+    agg["Deaths_per_100k"] = (agg[D] / poblacion_est) * 100000
 else:
-    agg["Rate_per_100k"] = np.nan
-    st.info("⚠️ La columna 'Population' no está disponible en este reporte, se omite la tasa por 100k.")
+    agg["Deaths_per_100k"] = np.nan
+    st.info("⚠️ No hay columna 'Incident_Rate' en este reporte, no se puede estimar la tasa por 100k.")
 
+st.dataframe(agg.head(20))
 
 # 2. Intervalos de confianza para CFR
 st.subheader("2. Intervalos de confianza para CFR")
