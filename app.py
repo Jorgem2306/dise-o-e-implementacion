@@ -212,7 +212,7 @@ st.line_chart(df_pais.set_index("date")[["C_suavizado", "D_suavizado"]])
 st.subheader("3.2. Modelo de pronóstico (SARIMA)")
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 
-serie_casos = df_pais.set_index("Date")[C].asfreq("D").fillna(0)
+serie_casos = df_pais.set_index("Last_Update")[C].asfreq("D").fillna(0)
 
 try:
     # Ajustar modelo SARIMA simple (puedes tunear p,d,q)
