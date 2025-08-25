@@ -24,7 +24,43 @@ def load_daily_report(yyyy_mm_dd: str):
         "recovered": lower.get("recovered", "Recovered") if "recovered" in lower else None, 
         "active": lower.get("active", "Active") if "active" in lower else None, 
     } 
-    return df, url, cols 
+    return df, url, cols
+
+# ———————————————————————————————————————————————
+# (NUEVO) Carga histórica para series de tiempo
+# ———————————————————————————————————————————————
+@st.cache_data(show_spinner=True)
+def load_reports_range(start_date: str, end_date: str):
+    """
+    Descarga y concatena reportes diarios entre dos fechas (incluidas).
+    Devuelve un DataFrame estandarizado con columnas:
+    ['Report_Date','Country_Region','Confirmed','Deaths'].
+    Omite días sin archivo disponible.
+    """
+    start = pd.to_datetime(start_date)
+    end = pd.to_datetime(end_date)
+    frames = []
+    day = start
+    while day <= end:
+        try:
+            ds = day.strftime("%Y-%m-%d")
+            df_d, _, cols_d = load_daily_report(ds)
+            C = cols_d["confirmed"]; D = cols_d["deaths"]; CTRY = cols_d["country"]
+            tmp = df_d[[CTRY, C, D]].copy()
+            tmp = tmp.rename(columns={CTRY: "Country_Region", C: "Confirmed", D: "Deaths"})
+            tmp["Report_Date"] = pd.to_datetime(ds)
+            frames.append(tmp)
+        except Exception:
+            # Si el archivo no existe o cambia el esquema, se omite
+            pass
+        day += pd.Timedelta(days=1)
+    if not frames:
+        return pd.DataFrame(columns=["Report_Date","Country_Region","Confirmed","Deaths"])
+    out = pd.concat(frames, ignore_index=True)
+    # Asegurar tipos y no negativos
+    out["Confirmed"] = pd.to_numeric(out["Confirmed"], errors="coerce").fillna(0).clip(lower=0)
+    out["Deaths"] = pd.to_numeric(out["Deaths"], errors="coerce").fillna(0).clip(lower=0)
+    return out
 
 st.sidebar.title("Opciones") 
 fecha = st.sidebar.date_input("Fecha del reporte (JHU CSSE)", value=pd.to_datetime("2022-09-09")) 
@@ -191,3 +227,64 @@ media, sigma = muertes.mean(), muertes.std() # Media y desviación estándar
 lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0) # Límites superior e inferior (3σ) 
 st.line_chart(muertes) # Gráfico de línea de muertes 
 st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}") 
+
+# ———————————————————————————————————————————————
+# PARTE 3: Series de tiempo y pronósticos
+# ———————————————————————————————————————————————
+st.header("PARTE 3 – Series de tiempo")
+
+# 3.1. Generar series de tiempo por país con suavizado de 7 días (NUEVO)
+st.subheader("3.1 Series de tiempo por país (suavizado 7 días)")
+
+# Límite superior razonable (último día con reportes JHU)
+max_repo_date = pd.to_datetime("2022-09-09")
+end_default = min(pd.to_datetime(fecha), max_repo_date)
+
+col_hist_1, col_hist_2 = st.columns(2)
+with col_hist_1:
+    start_hist = st.date_input("Fecha inicial (histórico)", value=pd.to_datetime("2020-03-01"))
+with col_hist_2:
+    end_hist = st.date_input("Fecha final (histórico)", value=end_default)
+
+# Cargar histórico estandarizado
+df_hist = load_reports_range(pd.to_datetime(start_hist).strftime("%Y-%m-%d"),
+                             pd.to_datetime(end_hist).strftime("%Y-%m-%d"))
+
+if df_hist.empty:
+    st.warning("No se pudo construir el histórico para el rango dado.")
+else:
+    # Agregar por día y país (acumulados diarios)
+    daily = (
+        df_hist.groupby(["Report_Date","Country_Region"])[["Confirmed","Deaths"]]
+        .sum(numeric_only=True)
+        .reset_index()
+        .sort_values("Report_Date")
+    )
+
+    # Selector de país
+    paises_ts = sorted(daily["Country_Region"].unique().tolist())
+    pais_ts = st.selectbox("Selecciona país (series)", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
+
+    df_pais = daily[daily["Country_Region"] == pais_ts].copy()
+    df_pais = df_pais.set_index("Report_Date").sort_index()
+
+    # Derivar series diarias (diferencia de acumulados)
+    df_pais["NewConfirmed"] = df_pais["Confirmed"].diff().clip(lower=0).fillna(0)
+    df_pais["NewDeaths"] = df_pais["Deaths"].diff().clip(lower=0).fillna(0)
+
+    # Suavizado 7 días
+    df_pais["NewConfirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
+    df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
+
+    # Gráficas
+    c1, c2 = st.columns(2)
+    with c1:
+        st.write(f"{pais_ts} – Nuevos confirmados (diario vs 7d)")
+        st.line_chart(df_pais[["NewConfirmed","NewConfirmed_7d"]])
+    with c2:
+        st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
+        st.line_chart(df_pais[["NewDeaths","NewDeaths_7d"]])
+
+    with st.expander("Ver tabla (últimos 30 días)"):
+        st.dataframe(df_pais[["NewConfirmed","NewConfirmed_7d","NewDeaths","NewDeaths_7d"]].tail(30).round(2))
+
