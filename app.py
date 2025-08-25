@@ -93,7 +93,7 @@ st.pyplot(fig2)
 # ============================
 st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
-def backtest(serie, modelo, pasos=14, ventana=14):
+def backtest(serie, modelo, pasos=7, ventana=7):
     errores_mae = []
     errores_mape = []
     for i in range(ventana, len(serie) - pasos):
