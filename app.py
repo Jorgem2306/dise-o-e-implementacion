@@ -251,8 +251,6 @@ with c2:
 # ——————————————————————
 st.subheader("3.4 Pronóstico con bandas de confianza (14 días)")
 
-modelo_forecast = st.radio("Modelo para forecast:", ["SARIMA", "ETS"], index=0)
-
 serie_casos = df_pais["NewConfirmed"]
 serie_muertes = df_pais["NewDeaths"]
 pasos = 14
@@ -260,12 +258,18 @@ pasos = 14
 def forecast_conf(serie, modelo, pasos=14):
     if modelo == "SARIMA":
         modelo_fit = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+        pred = modelo_fit.get_forecast(steps=pasos)
+        media = pred.predicted_mean
+        ci = pred.conf_int(alpha=0.05)
     else:
         modelo_fit = ExponentialSmoothing(serie, trend="add", seasonal=None).fit()
-
-    pred = modelo_fit.get_forecast(steps=pasos)
-    media = pred.predicted_mean
-    ci = pred.conf_int(alpha=0.05)
+        media = modelo_fit.forecast(pasos)
+        resid = serie - modelo_fit.fittedvalues
+        std = resid.std()
+        ci = pd.DataFrame({
+            "lower": media - 1.96*std,
+            "upper": media + 1.96*std
+        })
     return media, ci
 
 # Casos
@@ -273,7 +277,7 @@ media_casos, ci_casos = forecast_conf(serie_casos, modelo_forecast, pasos)
 fig, ax = plt.subplots()
 ax.plot(serie_casos.index, serie_casos, label="Histórico")
 ax.plot(media_casos.index, media_casos, color="red", label="Forecast")
-ax.fill_between(media_casos.index, ci_casos.iloc[:,0], ci_casos.iloc[:,1], 
+ax.fill_between(media_casos.index, ci_casos.iloc[:,0], ci_casos.iloc[:,1],
                 color="pink", alpha=0.3, label="IC 95%")
 ax.legend()
 ax.set_title(f"{pais_ts} – Nuevos casos (Forecast con IC)")
@@ -284,10 +288,8 @@ media_muertes, ci_muertes = forecast_conf(serie_muertes, modelo_forecast, pasos)
 fig, ax = plt.subplots()
 ax.plot(serie_muertes.index, serie_muertes, label="Histórico")
 ax.plot(media_muertes.index, media_muertes, color="red", label="Forecast")
-ax.fill_between(media_muertes.index, ci_muertes.iloc[:,0], ci_muertes.iloc[:,1], 
+ax.fill_between(media_muertes.index, ci_muertes.iloc[:,0], ci_muertes.iloc[:,1],
                 color="pink", alpha=0.3, label="IC 95%")
 ax.legend()
 ax.set_title(f"{pais_ts} – Nuevas muertes (Forecast con IC)")
 st.pyplot(fig)
-
-
