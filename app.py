@@ -166,13 +166,34 @@ st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior
 st.header("PARTE 3 – Series de tiempo")
 st.subheader("3.1 Series de tiempo por país (suavizado 7 días)")
 
-# Selector país
-paises_ts = sorted(df["Country_Region"].unique().tolist())
-pais_ts = st.selectbox("Selecciona país (series)", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
+# URLs de series temporales globales
+url_confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
+url_deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
 
-df_pais = df[df["Country_Region"] == pais_ts].copy().sort_values("Last_Update")
-df_pais["NewConfirmed"] = df_pais[C].diff().clip(lower=0).fillna(0)
-df_pais["NewDeaths"] = df_pais[D].diff().clip(lower=0).fillna(0)
+df_conf = pd.read_csv(url_confirmed)
+df_deaths = pd.read_csv(url_deaths)
+
+# Reorganizar: columnas de fechas → filas
+df_conf = df_conf.drop(columns=["Province/State", "Lat", "Long"]).groupby("Country/Region").sum().T
+df_deaths = df_deaths.drop(columns=["Province/State", "Lat", "Long"]).groupby("Country/Region").sum().T
+
+# Convertir índices a fecha
+df_conf.index = pd.to_datetime(df_conf.index)
+df_deaths.index = pd.to_datetime(df_deaths.index)
+
+# Selector país
+paises_ts = sorted(df_conf.columns.tolist())
+pais_ts = st.selectbox("Selecciona país", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
+
+# Calcular casos/muertes diarios
+df_pais = pd.DataFrame({
+    "Confirmed": df_conf[pais_ts],
+    "Deaths": df_deaths[pais_ts]
+})
+df_pais["NewConfirmed"] = df_pais["Confirmed"].diff().clip(lower=0).fillna(0)
+df_pais["NewDeaths"] = df_pais["Deaths"].diff().clip(lower=0).fillna(0)
+
+# Suavizado 7 días
 df_pais["NewConfirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
 df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
 
@@ -180,7 +201,7 @@ df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
 c1, c2 = st.columns(2)
 with c1:
     st.write(f"{pais_ts} – Nuevos confirmados (diario vs 7d)")
-    st.line_chart(df_pais.set_index("Last_Update")[["NewConfirmed", "NewConfirmed_7d"]])
+    st.line_chart(df_pais[["NewConfirmed", "NewConfirmed_7d"]])
 with c2:
     st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
-    st.line_chart(df_pais.set_index("Last_Update")[["NewDeaths", "NewDeaths_7d"]])
+    st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
