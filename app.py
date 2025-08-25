@@ -206,4 +206,88 @@ with c2:
     st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
     st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
 
+# ——————————————————————
+# PARTE 3.2 – Pronóstico SARIMA o ETS
+# ——————————————————————
+st.subheader("3.2 Pronóstico de casos y muertes a 14 días")
+
+modelo_opcion = st.selectbox("Selecciona el modelo de pronóstico", ["SARIMA", "ETS"])
+
+# Reducimos la serie a últimos 180 días
+serie_confirmados = df_pais["NewConfirmed"].tail(180)
+serie_muertes = df_pais["NewDeaths"].tail(180)
+
+# Función de pronóstico
+def pronosticar(serie, modelo, pasos=14):
+    try:
+        if modelo == "SARIMA":
+            modelo_fit = sm.tsa.statespace.SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+        else:
+            modelo_fit = ETSModel(serie, trend="add", seasonal="add", seasonal_periods=7).fit()
+        return modelo_fit.forecast(steps=pasos)
+    except:
+        return pd.Series([np.nan]*pasos)
+
+# Pronóstico
+pred_conf = pronosticar(serie_confirmados, modelo_opcion)
+pred_muertes = pronosticar(serie_muertes, modelo_opcion)
+
+# Mostrar gráficas
+c1, c2 = st.columns(2)
+with c1:
+    st.write(f"{pais_ts} – Confirmados diarios (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_confirmados,
+        "Pronóstico": pred_conf
+    }))
+with c2:
+    st.write(f"{pais_ts} – Muertes diarias (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_muertes,
+        "Pronóstico": pred_muertes
+    }))
+# ——————————————————————
+# PARTE 3.4 – Forecast con intervalos de confianza
+# ——————————————————————
+st.subheader("3.4 Pronóstico con bandas de confianza (14 días)")
+
+modelo_forecast = st.radio("Modelo para forecast:", ["SARIMA", "ETS"], index=0)
+
+serie_casos = df_pais["NewConfirmed"]
+serie_muertes = df_pais["NewDeaths"]
+pasos = 14
+
+def forecast_conf(serie, modelo, pasos=14):
+    if modelo == "SARIMA":
+        modelo_fit = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+    else:
+        modelo_fit = ExponentialSmoothing(serie, trend="add", seasonal=None).fit()
+
+    pred = modelo_fit.get_forecast(steps=pasos)
+    media = pred.predicted_mean
+    ci = pred.conf_int(alpha=0.05)
+    return media, ci
+
+# Casos
+media_casos, ci_casos = forecast_conf(serie_casos, modelo_forecast, pasos)
+fig, ax = plt.subplots()
+ax.plot(serie_casos.index, serie_casos, label="Histórico")
+ax.plot(media_casos.index, media_casos, color="red", label="Forecast")
+ax.fill_between(media_casos.index, ci_casos.iloc[:,0], ci_casos.iloc[:,1], 
+                color="pink", alpha=0.3, label="IC 95%")
+ax.legend()
+ax.set_title(f"{pais_ts} – Nuevos casos (Forecast con IC)")
+st.pyplot(fig)
+
+# Muertes
+media_muertes, ci_muertes = forecast_conf(serie_muertes, modelo_forecast, pasos)
+fig, ax = plt.subplots()
+ax.plot(serie_muertes.index, serie_muertes, label="Histórico")
+ax.plot(media_muertes.index, media_muertes, color="red", label="Forecast")
+ax.fill_between(media_muertes.index, ci_muertes.iloc[:,0], ci_muertes.iloc[:,1], 
+                color="pink", alpha=0.3, label="IC 95%")
+ax.legend()
+ax.set_title(f"{pais_ts} – Nuevas muertes (Forecast con IC)")
+st.pyplot(fig)
+
 
