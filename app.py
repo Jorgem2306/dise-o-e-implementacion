@@ -265,23 +265,25 @@ with c2:
     st.line_chart(pd.concat([df_forecast["Real Muertes"], df_forecast_pred["Pred Muertes"]]))
 
 # ——————————————————————
-# PARTE 3.3 – Validación con Backtesting
+# PARTE 3.3 – Validación con Backtesting (MAE / MAPE)
 # ——————————————————————
 st.subheader("3.3 Validación del modelo con Backtesting (MAE / MAPE)")
 
-# Funciones propias de error
 def mean_absolute_error(y_true, y_pred):
     return np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
-    return np.mean(np.abs((y_true - y_pred) / np.clip(y_true, 1e-8, None)))  # evita div/0
+    return np.mean(np.abs((y_true - y_pred) / np.clip(y_true, 1e-8, None)))
 
-# Función de backtesting
-def backtest(serie, modelo="SARIMA", pasos=14, ventana=60):
+def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=10):
     errores_mae, errores_mape = [], []
+    serie = serie.tail(180)  # limitar datos para que no demore mucho
     
-    for i in range(ventana, len(serie)-pasos):
+    total_iters = len(range(ventana, len(serie)-pasos, step))
+    progress = st.progress(0)
+    
+    for j, i in enumerate(range(ventana, len(serie)-pasos, step)):
         train = serie.iloc[:i]
         test = serie.iloc[i:i+pasos]
 
@@ -293,18 +295,14 @@ def backtest(serie, modelo="SARIMA", pasos=14, ventana=60):
             errores_mae.append(mean_absolute_error(test, pred))
             errores_mape.append(mean_absolute_percentage_error(test, pred))
 
+        progress.progress((j+1)/total_iters)
+
     return np.mean(errores_mae), np.mean(errores_mape)
 
 # Backtesting para confirmados y muertes
 mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
 mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
 
-# Resultados
-st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
-st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
-st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
-
-# Resultados
 st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
 st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
 st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
