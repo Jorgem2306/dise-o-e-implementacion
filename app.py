@@ -247,7 +247,6 @@ with c2:
         "Pronóstico": pred_muertes
     }))
 
-
 # ——————————————————————
 # PARTE 3.3 – Validación con Backtesting
 # ——————————————————————
@@ -258,11 +257,19 @@ def mean_absolute_error(y_true, y_pred):
 
 def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
-    return np.mean(np.abs((y_true - y_pred) / np.clip(y_true, 1e-8, None)))
+    # Evitar división por cero
+    mask = y_true != 0
+    if mask.sum() == 0:
+        return np.nan
+    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]))
 
 def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=14):
     errores_mae, errores_mape = [], []
     serie = serie.tail(180)  # limitar datos
+
+    # si la serie es muy corta, no validar
+    if len(serie.dropna()) < ventana + pasos:
+        return np.nan, np.nan
 
     for i in range(ventana, len(serie)-pasos, step):
         train = serie.iloc[:i]
@@ -273,15 +280,27 @@ def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=14):
         test = test[:len(pred)]
 
         if len(test) > 0 and pred.notna().sum() > 0:
-            errores_mae.append(mean_absolute_error(test, pred))
-            errores_mape.append(mean_absolute_percentage_error(test, pred))
+            mae = mean_absolute_error(test, pred)
+            mape = mean_absolute_percentage_error(test, pred)
+            if not np.isnan(mae): errores_mae.append(mae)
+            if not np.isnan(mape): errores_mape.append(mape)
 
+    if len(errores_mae) == 0 or len(errores_mape) == 0:
+        return np.nan, np.nan
     return np.mean(errores_mae), np.mean(errores_mape)
+
 
 with st.spinner("Validando modelo..."):
     mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
     mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
 
 st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
-st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
-st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
+if np.isnan(mae_conf) or np.isnan(mape_conf):
+    st.warning("⚠️ No hay suficientes datos confiables para validar confirmados.")
+else:
+    st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
+
+if np.isnan(mae_muertes) or np.isnan(mape_muertes):
+    st.warning("⚠️ No hay suficientes datos confiables para validar muertes.")
+else:
+    st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
