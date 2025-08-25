@@ -207,67 +207,51 @@ with c2:
     st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
 
 # ——————————————————————
-# PARTE 3.2 – Pronóstico con SARIMA o ETS
+# PARTE 3.2 – Pronóstico SARIMA o ETS
 # ——————————————————————
 st.subheader("3.2 Pronóstico de casos y muertes a 14 días")
 
-# Selector de modelo
-modelo_opcion = st.radio("Selecciona el modelo de pronóstico:", ["SARIMA", "ETS"])
+modelo_opcion = st.selectbox("Selecciona el modelo de pronóstico", ["SARIMA", "ETS"])
 
-# Datos del país seleccionado en 3.1
-serie_confirmados = df_pais["NewConfirmed"].fillna(0)
-serie_muertes = df_pais["NewDeaths"].fillna(0)
+# Reducimos la serie a últimos 180 días
+serie_confirmados = df_pais["NewConfirmed"].tail(180)
+serie_muertes = df_pais["NewDeaths"].tail(180)
 
-horizonte = 14  # días a predecir
+# Función de pronóstico
+def pronosticar(serie, modelo, pasos=14):
+    try:
+        if modelo == "SARIMA":
+            modelo_fit = sm.tsa.statespace.SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+        else:
+            modelo_fit = ETSModel(serie, trend="add", seasonal="add", seasonal_periods=7).fit()
+        return modelo_fit.forecast(steps=pasos)
+    except:
+        return pd.Series([np.nan]*pasos)
 
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+# Pronóstico
+pred_conf = pronosticar(serie_confirmados, modelo_opcion)
+pred_muertes = pronosticar(serie_muertes, modelo_opcion)
 
-def pronosticar(serie, modelo="SARIMA", pasos=14):
-    if modelo == "SARIMA":
-        # Modelo SARIMA simple (puedes ajustar los parámetros)
-        try:
-            mod = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7))
-            res = mod.fit(disp=False)
-            pred = res.forecast(steps=pasos)
-        except:
-            pred = pd.Series([None]*pasos, index=pd.date_range(serie.index[-1]+pd.Timedelta(days=1), periods=pasos))
-    else:  # ETS
-        try:
-            mod = ExponentialSmoothing(serie, trend="add", seasonal=None)
-            res = mod.fit()
-            pred = res.forecast(pasos)
-        except:
-            pred = pd.Series([None]*pasos, index=pd.date_range(serie.index[-1]+pd.Timedelta(days=1), periods=pasos))
-    return pred
-
-# Pronósticos
-pred_conf = pronosticar(serie_confirmados, modelo_opcion, horizonte)
-pred_muertes = pronosticar(serie_muertes, modelo_opcion, horizonte)
-
-# Combinar series reales + forecast
-df_forecast = pd.DataFrame({
-    "Real Confirmados": serie_confirmados,
-    "Real Muertes": serie_muertes
-})
-df_forecast_pred = pd.DataFrame({
-    "Pred Confirmados": pred_conf,
-    "Pred Muertes": pred_muertes
-})
-
-# Gráficas
+# Mostrar gráficas
 c1, c2 = st.columns(2)
 with c1:
-    st.write(f"{pais_ts} – Pronóstico de nuevos confirmados ({modelo_opcion})")
-    st.line_chart(pd.concat([df_forecast["Real Confirmados"], df_forecast_pred["Pred Confirmados"]]))
+    st.write(f"{pais_ts} – Confirmados diarios (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_confirmados,
+        "Pronóstico": pred_conf
+    }))
 with c2:
-    st.write(f"{pais_ts} – Pronóstico de nuevas muertes ({modelo_opcion})")
-    st.line_chart(pd.concat([df_forecast["Real Muertes"], df_forecast_pred["Pred Muertes"]]))
+    st.write(f"{pais_ts} – Muertes diarias (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_muertes,
+        "Pronóstico": pred_muertes
+    }))
+
 
 # ——————————————————————
-# PARTE 3.3 – Validación con Backtesting (MAE / MAPE)
+# PARTE 3.3 – Validación con Backtesting
 # ——————————————————————
-st.subheader("3.3 Validación del modelo con Backtesting (MAE / MAPE)")
+st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
 def mean_absolute_error(y_true, y_pred):
     return np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
@@ -276,14 +260,11 @@ def mean_absolute_percentage_error(y_true, y_pred):
     y_true, y_pred = np.array(y_true), np.array(y_pred)
     return np.mean(np.abs((y_true - y_pred) / np.clip(y_true, 1e-8, None)))
 
-def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=10):
+def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=14):
     errores_mae, errores_mape = [], []
-    serie = serie.tail(180)  # limitar datos para que no demore mucho
-    
-    total_iters = len(range(ventana, len(serie)-pasos, step))
-    progress = st.progress(0)
-    
-    for j, i in enumerate(range(ventana, len(serie)-pasos, step)):
+    serie = serie.tail(180)  # limitar datos
+
+    for i in range(ventana, len(serie)-pasos, step):
         train = serie.iloc[:i]
         test = serie.iloc[i:i+pasos]
 
@@ -295,13 +276,11 @@ def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=10):
             errores_mae.append(mean_absolute_error(test, pred))
             errores_mape.append(mean_absolute_percentage_error(test, pred))
 
-        progress.progress((j+1)/total_iters)
-
     return np.mean(errores_mae), np.mean(errores_mape)
 
-# Backtesting para confirmados y muertes
-mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
-mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
+with st.spinner("Validando modelo..."):
+    mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
+    mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
 
 st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
 st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
