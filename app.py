@@ -205,3 +205,61 @@ with c1:
 with c2:
     st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
     st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
+
+# ——————————————————————
+# PARTE 3.2 – Pronóstico con SARIMA o ETS
+# ——————————————————————
+st.subheader("3.2 Pronóstico de casos y muertes a 14 días")
+
+# Selector de modelo
+modelo_opcion = st.radio("Selecciona el modelo de pronóstico:", ["SARIMA", "ETS"])
+
+# Datos del país seleccionado en 3.1
+serie_confirmados = df_pais["NewConfirmed"].fillna(0)
+serie_muertes = df_pais["NewDeaths"].fillna(0)
+
+horizonte = 14  # días a predecir
+
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+
+def pronosticar(serie, modelo="SARIMA", pasos=14):
+    if modelo == "SARIMA":
+        # Modelo SARIMA simple (puedes ajustar los parámetros)
+        try:
+            mod = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7))
+            res = mod.fit(disp=False)
+            pred = res.forecast(steps=pasos)
+        except:
+            pred = pd.Series([None]*pasos, index=pd.date_range(serie.index[-1]+pd.Timedelta(days=1), periods=pasos))
+    else:  # ETS
+        try:
+            mod = ExponentialSmoothing(serie, trend="add", seasonal=None)
+            res = mod.fit()
+            pred = res.forecast(pasos)
+        except:
+            pred = pd.Series([None]*pasos, index=pd.date_range(serie.index[-1]+pd.Timedelta(days=1), periods=pasos))
+    return pred
+
+# Pronósticos
+pred_conf = pronosticar(serie_confirmados, modelo_opcion, horizonte)
+pred_muertes = pronosticar(serie_muertes, modelo_opcion, horizonte)
+
+# Combinar series reales + forecast
+df_forecast = pd.DataFrame({
+    "Real Confirmados": serie_confirmados,
+    "Real Muertes": serie_muertes
+})
+df_forecast_pred = pd.DataFrame({
+    "Pred Confirmados": pred_conf,
+    "Pred Muertes": pred_muertes
+})
+
+# Gráficas
+c1, c2 = st.columns(2)
+with c1:
+    st.write(f"{pais_ts} – Pronóstico de nuevos confirmados ({modelo_opcion})")
+    st.line_chart(pd.concat([df_forecast["Real Confirmados"], df_forecast_pred["Pred Confirmados"]]))
+with c2:
+    st.write(f"{pais_ts} – Pronóstico de nuevas muertes ({modelo_opcion})")
+    st.line_chart(pd.concat([df_forecast["Real Muertes"], df_forecast_pred["Pred Muertes"]]))
