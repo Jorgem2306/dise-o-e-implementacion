@@ -87,46 +87,41 @@ forecast_muertes.plot(ax=ax2, label="Pronóstico", style="--")
 ax2.set_title(f"{pais_ts} – Pronóstico Muertes ({modelo})")
 ax2.legend()
 st.pyplot(fig2)
-
-# ============================
-# PARTE 3.3 – Validación Backtesting
-# ============================
+# ——————————————————————
+# PARTE 3.3 – Validación con Backtesting
+# ——————————————————————
 st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
-def backtest(serie, modelo, pasos=7, ventana=7):
-    errores_mae = []
-    errores_mape = []
-    for i in range(ventana, len(serie) - pasos):
-        train = serie[:i]
-        test = serie[i:i+pasos]
+try:
+    # Validación SARIMA
+    def backtesting(serie, pasos=14):
+        try:
+            n_train = int(len(serie) * 0.8)
+            train, test = serie.iloc[:n_train], serie.iloc[n_train:]
+            model = SARIMAX(train, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+            pred = model.get_forecast(steps=len(test)).predicted_mean
+            mae = mean_absolute_error(test, pred)
+            mape = mean_absolute_percentage_error(test, pred)
+            return mae, mape
+        except Exception as e:
+            return None, None
 
-        pred = forecast(train, modelo, pasos)
+    mae_c, mape_c = backtesting(df_pais["NewConfirmed"])
+    mae_d, mape_d = backtesting(df_pais["NewDeaths"])
 
-        if len(pred) == pasos:
-            try:
-                # Evitar problemas de MAPE con ceros
-                test_safe = test.replace(0, 1e-6)
-                errores_mae.append(mean_absolute_error(test, pred))
-                errores_mape.append(mean_absolute_percentage_error(test_safe, pred))
-            except Exception as e:
-                continue
-
-    if len(errores_mae) > 0:
-        return np.mean(errores_mae), np.mean(errores_mape)
+    st.write(f"{pais_ts} – Validación SARIMA")
+    if mae_c is not None:
+        st.write(f"Nuevos confirmados → MAE: {mae_c:.2f}, MAPE: {mape_c*100:.2f}%")
     else:
-        return np.nan, np.nan
+        st.write("Nuevos confirmados → No se pudo calcular (serie muy corta o inválida)")
 
-mae_conf, mape_conf = backtest(serie_confirmados, modelo)
-mae_muertes, mape_muertes = backtest(serie_muertes, modelo)
+    if mae_d is not None:
+        st.write(f"Nuevas muertes → MAE: {mae_d:.2f}, MAPE: {mape_d*100:.2f}%")
+    else:
+        st.write("Nuevas muertes → No se pudo calcular (serie muy corta o inválida)")
 
-st.write(f"{pais_ts} – Validación {modelo}")
-st.write(f"Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}" if not np.isnan(mae_conf) else "⚠️ No hay suficientes datos para confirmados")
-st.write(f"Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}" if not np.isnan(mae_muertes) else "⚠️ No hay suficientes datos para muertes")
-
-    st.warning("⚠️ No hay suficientes datos confiables para validar muertes.")
-else:
-    st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
-
+except Exception as e:
+    st.warning(f"Error en 3.3: {e}")
 # ——————————————————————
 # PARTE 3.4 – Forecast con intervalos de confianza
 # ——————————————————————
@@ -134,10 +129,8 @@ st.subheader("3.4 Pronóstico con bandas de confianza (14 días)")
 
 modelo_forecast = st.radio("Modelo para forecast:", ["SARIMA", "ETS"], index=0)
 
-# Seleccionamos la serie diaria (casos o muertes)
 serie_casos = df_pais["NewConfirmed"]
 serie_muertes = df_pais["NewDeaths"]
-
 pasos = 14
 
 def forecast_conf(serie, modelo, pasos=14):
@@ -148,33 +141,26 @@ def forecast_conf(serie, modelo, pasos=14):
 
     pred = modelo_fit.get_forecast(steps=pasos)
     media = pred.predicted_mean
-    ci = pred.conf_int(alpha=0.05)  # intervalo al 95%
+    ci = pred.conf_int(alpha=0.05)
     return media, ci
 
-# Forecast de casos
-media_casos, ci_casos = forecast_conf(serie_casos, modelo_forecast, pasos)
-# Forecast de muertes
-media_muertes, ci_muertes = forecast_conf(serie_muertes, modelo_forecast, pasos)
-
-import matplotlib.pyplot as plt
-
 # Casos
+media_casos, ci_casos = forecast_conf(serie_casos, modelo_forecast, pasos)
 fig, ax = plt.subplots()
 ax.plot(serie_casos.index, serie_casos, label="Histórico")
-ax.plot(media_casos.index, media_casos, label="Forecast", color="red")
-ax.fill_between(media_casos.index,
-                ci_casos.iloc[:,0], ci_casos.iloc[:,1],
+ax.plot(media_casos.index, media_casos, color="red", label="Forecast")
+ax.fill_between(media_casos.index, ci_casos.iloc[:,0], ci_casos.iloc[:,1], 
                 color="pink", alpha=0.3, label="IC 95%")
 ax.legend()
 ax.set_title(f"{pais_ts} – Nuevos casos (Forecast con IC)")
 st.pyplot(fig)
 
 # Muertes
+media_muertes, ci_muertes = forecast_conf(serie_muertes, modelo_forecast, pasos)
 fig, ax = plt.subplots()
 ax.plot(serie_muertes.index, serie_muertes, label="Histórico")
-ax.plot(media_muertes.index, media_muertes, label="Forecast", color="red")
-ax.fill_between(media_muertes.index,
-                ci_muertes.iloc[:,0], ci_muertes.iloc[:,1],
+ax.plot(media_muertes.index, media_muertes, color="red", label="Forecast")
+ax.fill_between(media_muertes.index, ci_muertes.iloc[:,0], ci_muertes.iloc[:,1], 
                 color="pink", alpha=0.3, label="IC 95%")
 ax.legend()
 ax.set_title(f"{pais_ts} – Nuevas muertes (Forecast con IC)")
