@@ -269,16 +269,16 @@ with c2:
 # ——————————————————————
 st.subheader("3.3 Validación del modelo con Backtesting (MAE / MAPE)")
 
-from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
+# Funciones propias de error
+def mean_absolute_error(y_true, y_pred):
+    return np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
+
+def mean_absolute_percentage_error(y_true, y_pred):
+    y_true, y_pred = np.array(y_true), np.array(y_pred)
+    return np.mean(np.abs((y_true - y_pred) / np.clip(y_true, 1e-8, None)))  # evita div/0
 
 # Función de backtesting
 def backtest(serie, modelo="SARIMA", pasos=14, ventana=60):
-    """
-    serie: serie temporal (pd.Series)
-    modelo: "SARIMA" o "ETS"
-    pasos: horizonte de forecast
-    ventana: cantidad mínima de datos para empezar el backtest
-    """
     errores_mae, errores_mape = [], []
     
     for i in range(ventana, len(serie)-pasos):
@@ -286,8 +286,6 @@ def backtest(serie, modelo="SARIMA", pasos=14, ventana=60):
         test = serie.iloc[i:i+pasos]
 
         pred = pronosticar(train, modelo, pasos)
-
-        # Asegurar índices alineados
         pred = pred[:len(test)]
         test = test[:len(pred)]
 
@@ -300,6 +298,11 @@ def backtest(serie, modelo="SARIMA", pasos=14, ventana=60):
 # Backtesting para confirmados y muertes
 mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
 mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
+
+# Resultados
+st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
+st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
+st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
 
 # Resultados
 st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
