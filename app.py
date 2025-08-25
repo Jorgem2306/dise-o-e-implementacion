@@ -207,72 +207,42 @@ with c2:
     st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
 
 # ——————————————————————
-# PARTE 3.2 – Forecast (SARIMA o ETS)
+# PARTE 3.2 – Pronóstico SARIMA o ETS
 # ——————————————————————
-st.subheader("3.2 Pronóstico de casos y muertes (SARIMA o ETS)")
+st.subheader("3.2 Pronóstico de casos y muertes a 14 días")
 
-# Selector modelo
-modelo_forecast = st.radio(
-    "Selecciona el modelo de pronóstico",
-    ("SARIMA", "ETS"),
-    index=0
-)
+modelo_opcion = st.selectbox("Selecciona el modelo de pronóstico", ["SARIMA", "ETS"])
 
-# Serie de tiempo del país seleccionado
-serie_casos = df_pais.set_index("Last_Update")["NewConfirmed"]
-serie_muertes = df_pais.set_index("Last_Update")["NewDeaths"]
+# Reducimos la serie a últimos 180 días
+serie_confirmados = df_pais["NewConfirmed"].tail(180)
+serie_muertes = df_pais["NewDeaths"].tail(180)
 
-pasos = 14  # horizonte de forecast
+# Función de pronóstico
+def pronosticar(serie, modelo, pasos=14):
+    try:
+        if modelo == "SARIMA":
+            modelo_fit = sm.tsa.statespace.SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+        else:
+            modelo_fit = ETSModel(serie, trend="add", seasonal="add", seasonal_periods=7).fit()
+        return modelo_fit.forecast(steps=pasos)
+    except:
+        return pd.Series([np.nan]*pasos)
 
-from statsmodels.tsa.statespace.sarimax import SARIMAX
-from statsmodels.tsa.holtwinters import ExponentialSmoothing
+# Pronóstico
+pred_conf = pronosticar(serie_confirmados, modelo_opcion)
+pred_muertes = pronosticar(serie_muertes, modelo_opcion)
 
-def forecast_series(serie, modelo, pasos=14):
-    if modelo == "SARIMA":
-        mod = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7), enforce_stationarity=False, enforce_invertibility=False)
-        res = mod.fit(disp=False)
-        pred = res.get_forecast(steps=pasos)
-        media = pred.predicted_mean
-        conf = pred.conf_int()
-        return media, conf
-    else:  # ETS
-        mod = ExponentialSmoothing(serie, trend="add", seasonal="add", seasonal_periods=7)
-        res = mod.fit()
-        pred = res.forecast(pasos)
-        # Generamos bandas de confianza simples (+/- 1.96 * std residual)
-        resid = serie - res.fittedvalues
-        std = resid.std()
-        conf = pd.DataFrame({
-            "lower NewConfirmed": pred - 1.96*std,
-            "upper NewConfirmed": pred + 1.96*std
-        })
-        return pred, conf
-
-# Pronóstico casos
-media_casos, ci_casos = forecast_series(serie_casos, modelo_forecast, pasos)
-# Pronóstico muertes
-media_muertes, ci_muertes = forecast_series(serie_muertes, modelo_forecast, pasos)
-
-# ——————————————————————
-# PARTE 3.4 – Forecast con bandas de confianza
-# ——————————————————————
-st.subheader("3.4 Pronóstico con bandas de confianza")
-
+# Mostrar gráficas
 c1, c2 = st.columns(2)
-
 with c1:
-    st.write(f"{pais_ts} – Forecast de nuevos confirmados ({modelo_forecast})")
-    df_plot = pd.concat([serie_casos, media_casos], axis=0)
-    st.line_chart(df_plot)
-
-    # Mostrar bandas de confianza
-    if ci_casos is not None:
-        st.line_chart(ci_casos)
-
+    st.write(f"{pais_ts} – Confirmados diarios (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_confirmados,
+        "Pronóstico": pred_conf
+    }))
 with c2:
-    st.write(f"{pais_ts} – Forecast de nuevas muertes ({modelo_forecast})")
-    df_plot = pd.concat([serie_muertes, media_muertes], axis=0)
-    st.line_chart(df_plot)
-
-    if ci_muertes is not None:
-        st.line_chart(ci_muertes)
+    st.write(f"{pais_ts} – Muertes diarias (pronóstico {modelo_opcion})")
+    st.line_chart(pd.DataFrame({
+        "Histórico": serie_muertes,
+        "Pronóstico": pred_muertes
+    }))
