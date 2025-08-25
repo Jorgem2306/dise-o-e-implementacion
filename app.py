@@ -87,41 +87,7 @@ forecast_muertes.plot(ax=ax2, label="Pronóstico", style="--")
 ax2.set_title(f"{pais_ts} – Pronóstico Muertes ({modelo})")
 ax2.legend()
 st.pyplot(fig2)
-# ——————————————————————
-# PARTE 3.3 – Validación con Backtesting
-# ——————————————————————
-st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
-try:
-    # Validación SARIMA
-    def backtesting(serie, pasos=14):
-        try:
-            n_train = int(len(serie) * 0.8)
-            train, test = serie.iloc[:n_train], serie.iloc[n_train:]
-            model = SARIMAX(train, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
-            pred = model.get_forecast(steps=len(test)).predicted_mean
-            mae = mean_absolute_error(test, pred)
-            mape = mean_absolute_percentage_error(test, pred)
-            return mae, mape
-        except Exception as e:
-            return None, None
-
-    mae_c, mape_c = backtesting(df_pais["NewConfirmed"])
-    mae_d, mape_d = backtesting(df_pais["NewDeaths"])
-
-    st.write(f"{pais_ts} – Validación SARIMA")
-    if mae_c is not None:
-        st.write(f"Nuevos confirmados → MAE: {mae_c:.2f}, MAPE: {mape_c*100:.2f}%")
-    else:
-        st.write("Nuevos confirmados → No se pudo calcular (serie muy corta o inválida)")
-
-    if mae_d is not None:
-        st.write(f"Nuevas muertes → MAE: {mae_d:.2f}, MAPE: {mape_d*100:.2f}%")
-    else:
-        st.write("Nuevas muertes → No se pudo calcular (serie muy corta o inválida)")
-
-except Exception as e:
-    st.warning(f"Error en 3.3: {e}")
 # ——————————————————————
 # PARTE 3.4 – Forecast con intervalos de confianza
 # ——————————————————————
