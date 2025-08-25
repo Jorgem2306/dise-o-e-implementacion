@@ -93,19 +93,24 @@ st.pyplot(fig2)
 # ============================
 st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
-def backtest(serie, modelo, pasos=14, ventana=30):
+def backtest(serie, modelo, pasos=14, ventana=14):
     errores_mae = []
     errores_mape = []
     for i in range(ventana, len(serie) - pasos):
         train = serie[:i]
         test = serie[i:i+pasos]
+
         pred = forecast(train, modelo, pasos)
+
         if len(pred) == pasos:
             try:
+                # Evitar problemas de MAPE con ceros
+                test_safe = test.replace(0, 1e-6)
                 errores_mae.append(mean_absolute_error(test, pred))
-                errores_mape.append(mean_absolute_percentage_error(test, pred))
-            except:
+                errores_mape.append(mean_absolute_percentage_error(test_safe, pred))
+            except Exception as e:
                 continue
+
     if len(errores_mae) > 0:
         return np.mean(errores_mae), np.mean(errores_mape)
     else:
