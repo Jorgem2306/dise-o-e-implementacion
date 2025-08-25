@@ -2,198 +2,37 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy import stats
+from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from statsmodels.tsa.statespace.sarimax import SARIMAX
+from sklearn.metrics import mean_absolute_error, mean_absolute_percentage_error
 
-st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
+# ============================
+# CONFIGURACIÓN
+# ============================
+date_col = "Last_Update"
+country_col = "Country_Region"
+C, D = "Confirmed", "Deaths"
 
-GITHUB_URL = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/09-09-2022.csv"
+# Cargar datos desde URL
+url = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/09-09-2022.csv"
+df = pd.read_csv(url)
 
-@st.cache_data(show_spinner=False)
-def load_data():
-    df = pd.read_csv(GITHUB_URL)
-    df["Last_Update"] = pd.to_datetime(df["Last_Update"])
-    return df
+# Convertir fecha
+df[date_col] = pd.to_datetime(df[date_col])
 
-df = load_data()
-
-# Parte 1 y 2: tu código original
-st.sidebar.title("Opciones")
-st.sidebar.caption(f"Fuente: {GITHUB_URL}")
-
-st.title("Exploración COVID-19 – Versión Streamlit (Preg2)")
-st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).")
-
-# a) Mostrar filas
-st.header("a) Mostrar filas")
-mostrar_todas = st.checkbox("Mostrar todas las filas", value=False)
-if mostrar_todas:
-    st.dataframe(df, use_container_width=True)
-else:
-    st.dataframe(df.head(25), use_container_width=True)
-
-# b) Mostrar columnas
-st.header("b) Mostrar columnas")
-with st.expander("Vista de columnas"):
-    st.write(list(df.columns))
-st.caption("Usa el scroll horizontal de la tabla para ver todas las columnas en pantalla.")
-
-# c) Gráfica de líneas (muertes > 2500)
-st.header("c) Gráfica de líneas por país (muertes > 2500)")
-lower = {c.lower(): c for c in df.columns}
-C = lower.get("confirmed", "Confirmed")
-D = lower.get("deaths", "Deaths")
-R = lower.get("recovered", "Recovered")
-A = lower.get("active", "Active")
-
-metrics = [m for m in [C, D, R, A] if m in df.columns]
-base = df[[lower.get("country_region", "Country_Region")] + metrics].copy()
-base = base.rename(columns={lower.get("country_region", "Country_Region"): "Country_Region"})
-filtrado = base.loc[base[D] > 2500]
-agr = filtrado.groupby("Country_Region").sum(numeric_only=True)
-orden = agr.sort_values(D)
-if not orden.empty:
-    st.line_chart(orden[[c for c in [C, R, A] if c in orden.columns]])
-
-# d) Barras: fallecidos por estado de EE.UU.
-st.header("d) Barras: fallecidos por estado de EE.UU.")
-country_col = lower.get("country_region", "Country_Region")
-prov_col = lower.get("province_state", "Province_State")
-dfu = df[df[country_col] == "US"]
-if len(dfu) == 0:
-    st.info("Para esta fecha no hay registros con Country_Region='US'.")
-else:
-    agg_us = dfu.groupby(prov_col)[D].sum(numeric_only=True).sort_values(ascending=False)
-    top_n = st.slider("Top estados por fallecidos", 5, 50, 20)
-    st.bar_chart(agg_us.head(top_n))
-
-# e) Simulación de gráfico de sectores (barra)
-st.header("e) Gráfica de sectores (simulada)")
-lista_paises = ["Colombia", "Chile", "Peru", "Argentina", "Mexico"]
-sel = st.multiselect("Países", sorted(df[country_col].unique().tolist()), default=lista_paises)
-agg_latam = df[df[country_col].isin(sel)].groupby(country_col)[D].sum(numeric_only=True)
-if agg_latam.sum() > 0:
-    st.write("Participación de fallecidos")
-    st.dataframe(agg_latam)
-    normalized = agg_latam / agg_latam.sum()
-    st.bar_chart(normalized)
-else:
-    st.warning("Sin datos para los países seleccionados")
-
-# f) Histograma de fallecidos por país
-st.header("f) Histograma de fallecidos por país")
-muertes_pais = df.groupby(country_col)[D].sum(numeric_only=True)
-st.bar_chart(muertes_pais)
-
-# g) Boxplot simulado
-st.header("g) Boxplot (simulado)")
-cols_box = [c for c in [C, D, R, A] if c in df.columns]
-subset = df[cols_box].fillna(0)
-subset_plot = subset.head(25)
-st.write("Resumen estadístico (simulación de boxplot):")
-st.dataframe(subset_plot.describe().T)
-
-# PARTE 2 – Estadística descriptiva y avanzada
-st.header("PARTE 2 – Estadística descriptiva y avanzada")
-
-# 1. Métricas clave por país
-st.subheader("1. Métricas clave por país")
-agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
-agg["CFR"] = agg[D] / agg[C]
-if "Incident_Rate" in df.columns:
-    incident = df.groupby(country_col)["Incident_Rate"].mean(numeric_only=True)
-    poblacion_est = (agg[C] * 100000 / incident).replace([np.inf, -np.inf], np.nan)
-    agg["Deaths_per_100k"] = (agg[D] / poblacion_est) * 100000
-else:
-    agg["Deaths_per_100k"] = np.nan
-    st.info("⚠️ No hay columna 'Incident_Rate' en este reporte.")
-
-st.dataframe(agg.head(50))
-
-# 2. IC para CFR
-st.subheader("2. Intervalos de confianza para CFR")
-pais_ic = st.selectbox("Seleccionar país", agg.index.tolist())
-conf = 0.95
-n = agg.loc[pais_ic, C]
-x = agg.loc[pais_ic, D]
-if n > 0:
-    p_hat = x / n
-    se = np.sqrt(p_hat * (1 - p_hat) / n)
-    z = stats.norm.ppf(1 - (1 - conf) / 2)
-    ic_low, ic_high = p_hat - z * se, p_hat + z * se
-    st.write(f"CFR de {pais_ic}: {p_hat:.4f} (IC {conf*100:.0f}%: {ic_low:.4f} – {ic_high:.4f})")
-else:
-    st.warning("No hay suficientes casos para calcular IC.")
-
-# 3. Test de hipótesis para CFR
-st.subheader("3. Test de hipótesis: comparación de CFR entre dos países")
-pais1 = st.selectbox("País 1", agg.index.tolist(), index=0)
-pais2 = st.selectbox("País 2", agg.index.tolist(), index=1)
-n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D]
-n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D]
-if n1 > 0 and n2 > 0:
-    p1, p2 = x1 / n1, x2 / n2
-    p_pool = (x1 + x2) / (n1 + n2)
-    se = np.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2))
-    z_stat = (p1 - p2) / se
-    p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
-    st.write(f"CFR {pais1}: {p1:.4f}, CFR {pais2}: {p2:.4f}")
-    st.write(f"Z = {z_stat:.3f}, p-value = {p_val:.4g}")
-else:
-    st.warning("No hay suficientes casos para comparar.")
-
-# 4. Detección de outliers
-st.subheader("4. Detección de outliers")
-serie = agg[D]
-z_scores = np.abs(stats.zscore(serie))
-outliers = serie[z_scores > 3]
-if not outliers.empty:
-    st.write("Outliers detectados (Z-score > 3):")
-    st.dataframe(outliers)
-else:
-    st.info("No se detectaron outliers.")
-
-# 5. Gráfico de control 3σ
-st.subheader("5. Gráfico de control (3σ) de muertes diarias")
-muertes = df.groupby(country_col)[D].sum(numeric_only=True)
-media, sigma = muertes.mean(), muertes.std()
-lim_sup, lim_inf = media + 3 * sigma, max(media - 3 * sigma, 0)
-st.line_chart(muertes)
-st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}")
-
-# ——————————————————————
-# PARTE 3.1 – Series de tiempo con suavizado 7 días
-# ——————————————————————
-st.header("PARTE 3 – Series de tiempo")
+# ============================
+# PARTE 3.1 – Series de tiempo
+# ============================
+st.header("PARTE 3 – Series de tiempo y pronósticos")
 st.subheader("3.1 Series de tiempo por país (suavizado 7 días)")
 
-# URLs de series temporales globales
-url_confirmed = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_confirmed_global.csv"
-url_deaths = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/time_series_covid19_deaths_global.csv"
-
-df_conf = pd.read_csv(url_confirmed)
-df_deaths = pd.read_csv(url_deaths)
-
-# Reorganizar: columnas de fechas → filas
-df_conf = df_conf.drop(columns=["Province/State", "Lat", "Long"]).groupby("Country/Region").sum().T
-df_deaths = df_deaths.drop(columns=["Province/State", "Lat", "Long"]).groupby("Country/Region").sum().T
-
-# Convertir índices a fecha
-df_conf.index = pd.to_datetime(df_conf.index)
-df_deaths.index = pd.to_datetime(df_deaths.index)
-
 # Selector país
-paises_ts = sorted(df_conf.columns.tolist())
+paises_ts = sorted(df[country_col].unique().tolist())
 pais_ts = st.selectbox("Selecciona país", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
 
-# Calcular casos/muertes diarios
-df_pais = pd.DataFrame({
-    "Confirmed": df_conf[pais_ts],
-    "Deaths": df_deaths[pais_ts]
-})
-df_pais["NewConfirmed"] = df_pais["Confirmed"].diff().clip(lower=0).fillna(0)
-df_pais["NewDeaths"] = df_pais["Deaths"].diff().clip(lower=0).fillna(0)
-
-# Suavizado 7 días
+df_pais = df[df[country_col] == pais_ts].copy().sort_values(date_col)
+df_pais["NewConfirmed"] = df_pais[C].diff().clip(lower=0).fillna(0)
+df_pais["NewDeaths"] = df_pais[D].diff().clip(lower=0).fillna(0)
 df_pais["NewConfirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
 df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
 
@@ -201,106 +40,84 @@ df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
 c1, c2 = st.columns(2)
 with c1:
     st.write(f"{pais_ts} – Nuevos confirmados (diario vs 7d)")
-    st.line_chart(df_pais[["NewConfirmed", "NewConfirmed_7d"]])
+    st.line_chart(df_pais.set_index(date_col)[["NewConfirmed", "NewConfirmed_7d"]])
 with c2:
     st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
-    st.line_chart(df_pais[["NewDeaths", "NewDeaths_7d"]])
+    st.line_chart(df_pais.set_index(date_col)[["NewDeaths", "NewDeaths_7d"]])
 
-# ——————————————————————
-# PARTE 3.2 – Pronóstico SARIMA o ETS
-# ——————————————————————
+# ============================
+# PARTE 3.2 – Pronóstico
+# ============================
 st.subheader("3.2 Pronóstico de casos y muertes a 14 días")
 
-modelo_opcion = st.selectbox("Selecciona el modelo de pronóstico", ["SARIMA", "ETS"])
+modelo = st.radio("Selecciona modelo", ["SARIMA", "ETS"])
 
-# Reducimos la serie a últimos 180 días
-serie_confirmados = df_pais["NewConfirmed"].tail(180)
-serie_muertes = df_pais["NewDeaths"].tail(180)
-
-# Función de pronóstico
-def pronosticar(serie, modelo, pasos=14):
+def forecast(serie, modelo, pasos=14):
     try:
         if modelo == "SARIMA":
-            modelo_fit = sm.tsa.statespace.SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
-        else:
-            modelo_fit = ETSModel(serie, trend="add", seasonal="add", seasonal_periods=7).fit()
-        return modelo_fit.forecast(steps=pasos)
-    except:
-        return pd.Series([np.nan]*pasos)
+            mod = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7))
+            res = mod.fit(disp=False)
+            return res.get_forecast(steps=pasos).predicted_mean
+        else:  # ETS
+            mod = ExponentialSmoothing(serie, trend="add", seasonal="add", seasonal_periods=7)
+            res = mod.fit()
+            return res.forecast(pasos)
+    except Exception as e:
+        st.warning(f"⚠️ Error al generar pronóstico: {e}")
+        return pd.Series()
 
-# Pronóstico
-pred_conf = pronosticar(serie_confirmados, modelo_opcion)
-pred_muertes = pronosticar(serie_muertes, modelo_opcion)
+# Series
+serie_confirmados = df_pais["NewConfirmed_7d"].dropna()
+serie_muertes = df_pais["NewDeaths_7d"].dropna()
 
-# Mostrar gráficas
-c1, c2 = st.columns(2)
-with c1:
-    st.write(f"{pais_ts} – Confirmados diarios (pronóstico {modelo_opcion})")
-    st.line_chart(pd.DataFrame({
-        "Histórico": serie_confirmados,
-        "Pronóstico": pred_conf
-    }))
-with c2:
-    st.write(f"{pais_ts} – Muertes diarias (pronóstico {modelo_opcion})")
-    st.line_chart(pd.DataFrame({
-        "Histórico": serie_muertes,
-        "Pronóstico": pred_muertes
-    }))
+forecast_conf = forecast(serie_confirmados, modelo)
+forecast_muertes = forecast(serie_muertes, modelo)
 
-# ——————————————————————
-# PARTE 3.3 – Validación con Backtesting
-# ——————————————————————
+# Mostrar gráficos de pronóstico
+fig1, ax1 = plt.subplots()
+serie_confirmados.plot(ax=ax1, label="Histórico")
+forecast_conf.plot(ax=ax1, label="Pronóstico", style="--")
+ax1.set_title(f"{pais_ts} – Pronóstico Confirmados ({modelo})")
+ax1.legend()
+st.pyplot(fig1)
+
+fig2, ax2 = plt.subplots()
+serie_muertes.plot(ax=ax2, label="Histórico")
+forecast_muertes.plot(ax=ax2, label="Pronóstico", style="--")
+ax2.set_title(f"{pais_ts} – Pronóstico Muertes ({modelo})")
+ax2.legend()
+st.pyplot(fig2)
+
+# ============================
+# PARTE 3.3 – Validación Backtesting
+# ============================
 st.subheader("3.3 Validación con Backtesting (MAE / MAPE)")
 
-def mean_absolute_error(y_true, y_pred):
-    return np.mean(np.abs(np.array(y_true) - np.array(y_pred)))
-
-def mean_absolute_percentage_error(y_true, y_pred):
-    y_true, y_pred = np.array(y_true), np.array(y_pred)
-    # Evitar división por cero
-    mask = y_true != 0
-    if mask.sum() == 0:
-        return np.nan
-    return np.mean(np.abs((y_true[mask] - y_pred[mask]) / y_true[mask]))
-
-def backtest(serie, modelo="SARIMA", pasos=14, ventana=60, step=14):
-    errores_mae, errores_mape = [], []
-    serie = serie.tail(180)  # limitar datos
-
-    # si la serie es muy corta, no validar
-    if len(serie.dropna()) < ventana + pasos:
+def backtest(serie, modelo, pasos=14, ventana=30):
+    errores_mae = []
+    errores_mape = []
+    for i in range(ventana, len(serie) - pasos):
+        train = serie[:i]
+        test = serie[i:i+pasos]
+        pred = forecast(train, modelo, pasos)
+        if len(pred) == pasos:
+            try:
+                errores_mae.append(mean_absolute_error(test, pred))
+                errores_mape.append(mean_absolute_percentage_error(test, pred))
+            except:
+                continue
+    if len(errores_mae) > 0:
+        return np.mean(errores_mae), np.mean(errores_mape)
+    else:
         return np.nan, np.nan
 
-    for i in range(ventana, len(serie)-pasos, step):
-        train = serie.iloc[:i]
-        test = serie.iloc[i:i+pasos]
+mae_conf, mape_conf = backtest(serie_confirmados, modelo)
+mae_muertes, mape_muertes = backtest(serie_muertes, modelo)
 
-        pred = pronosticar(train, modelo, pasos)
-        pred = pred[:len(test)]
-        test = test[:len(pred)]
+st.write(f"{pais_ts} – Validación {modelo}")
+st.write(f"Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}" if not np.isnan(mae_conf) else "⚠️ No hay suficientes datos para confirmados")
+st.write(f"Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}" if not np.isnan(mae_muertes) else "⚠️ No hay suficientes datos para muertes")
 
-        if len(test) > 0 and pred.notna().sum() > 0:
-            mae = mean_absolute_error(test, pred)
-            mape = mean_absolute_percentage_error(test, pred)
-            if not np.isnan(mae): errores_mae.append(mae)
-            if not np.isnan(mape): errores_mape.append(mape)
-
-    if len(errores_mae) == 0 or len(errores_mape) == 0:
-        return np.nan, np.nan
-    return np.mean(errores_mae), np.mean(errores_mape)
-
-
-with st.spinner("Validando modelo..."):
-    mae_conf, mape_conf = backtest(serie_confirmados, modelo_opcion)
-    mae_muertes, mape_muertes = backtest(serie_muertes, modelo_opcion)
-
-st.write(f"**{pais_ts} – Validación {modelo_opcion}**")
-if np.isnan(mae_conf) or np.isnan(mape_conf):
-    st.warning("⚠️ No hay suficientes datos confiables para validar confirmados.")
-else:
-    st.write(f"- Nuevos confirmados → MAE: {mae_conf:.2f}, MAPE: {mape_conf:.2%}")
-
-if np.isnan(mae_muertes) or np.isnan(mape_muertes):
     st.warning("⚠️ No hay suficientes datos confiables para validar muertes.")
 else:
     st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
