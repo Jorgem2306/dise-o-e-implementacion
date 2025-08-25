@@ -1,290 +1,186 @@
-import streamlit as st 
-import pandas as pd 
-import numpy as np 
-from io import StringIO 
-from scipy import stats 
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
 
-st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide") 
+st.set_page_config(page_title="COVID-19 Viz – Pregunta 2", layout="wide")
 
-GITHUB_BASE = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports" 
+GITHUB_URL = "https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_daily_reports/09-09-2022.csv"
 
-@st.cache_data(show_spinner=False) 
-def load_daily_report(yyyy_mm_dd: str): 
-    yyyy, mm, dd = yyyy_mm_dd.split("-") 
-    url = f"{GITHUB_BASE}/{mm}-{dd}-{yyyy}.csv" 
-    df = pd.read_csv(url) 
-    
-    # normalizar nombres por si varían 
-    lower = {c.lower(): c for c in df.columns} 
-    cols = { 
-        "country": lower.get("country_region", "Country_Region"), 
-        "province": lower.get("province_state", "Province_State"), 
-        "confirmed": lower.get("confirmed", "Confirmed"), 
-        "deaths": lower.get("deaths", "Deaths"), 
-        "recovered": lower.get("recovered", "Recovered") if "recovered" in lower else None, 
-        "active": lower.get("active", "Active") if "active" in lower else None, 
-    } 
-    return df, url, cols
+@st.cache_data(show_spinner=False)
+def load_data():
+    df = pd.read_csv(GITHUB_URL)
+    df["Last_Update"] = pd.to_datetime(df["Last_Update"])
+    return df
 
-# ———————————————————————————————————————————————
-# (NUEVO) Carga histórica para series de tiempo
-# ———————————————————————————————————————————————
-@st.cache_data(show_spinner=True)
-def load_reports_range(start_date: str, end_date: str):
-    """
-    Descarga y concatena reportes diarios entre dos fechas (incluidas).
-    Devuelve un DataFrame estandarizado con columnas:
-    ['Report_Date','Country_Region','Confirmed','Deaths'].
-    Omite días sin archivo disponible.
-    """
-    start = pd.to_datetime(start_date)
-    end = pd.to_datetime(end_date)
-    frames = []
-    day = start
-    while day <= end:
-        try:
-            ds = day.strftime("%Y-%m-%d")
-            df_d, _, cols_d = load_daily_report(ds)
-            C = cols_d["confirmed"]; D = cols_d["deaths"]; CTRY = cols_d["country"]
-            tmp = df_d[[CTRY, C, D]].copy()
-            tmp = tmp.rename(columns={CTRY: "Country_Region", C: "Confirmed", D: "Deaths"})
-            tmp["Report_Date"] = pd.to_datetime(ds)
-            frames.append(tmp)
-        except Exception:
-            # Si el archivo no existe o cambia el esquema, se omite
-            pass
-        day += pd.Timedelta(days=1)
-    if not frames:
-        return pd.DataFrame(columns=["Report_Date","Country_Region","Confirmed","Deaths"])
-    out = pd.concat(frames, ignore_index=True)
-    # Asegurar tipos y no negativos
-    out["Confirmed"] = pd.to_numeric(out["Confirmed"], errors="coerce").fillna(0).clip(lower=0)
-    out["Deaths"] = pd.to_numeric(out["Deaths"], errors="coerce").fillna(0).clip(lower=0)
-    return out
+df = load_data()
 
-st.sidebar.title("Opciones") 
-fecha = st.sidebar.date_input("Fecha del reporte (JHU CSSE)", value=pd.to_datetime("2022-09-09")) 
-fecha_str = pd.to_datetime(fecha).strftime("%Y-%m-%d") 
-df, source_url, cols = load_daily_report(fecha_str) 
-st.sidebar.caption(f"Fuente: {source_url}") 
+# Parte 1 y 2: tu código original
+st.sidebar.title("Opciones")
+st.sidebar.caption(f"Fuente: {GITHUB_URL}")
 
-st.title("Exploración COVID-19 – Versión Streamlit (Preg2)") 
-st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).") 
+st.title("Exploración COVID-19 – Versión Streamlit (Preg2)")
+st.caption("Adaptación fiel del script original: mostrar/ocultar filas/columnas y varios gráficos (líneas, barras, sectores, histograma y boxplot).")
 
-# ——————————————————————————————————————————————— 
-# a) Mostrar todas las filas del dataset, luego volver al estado inicial 
-# ——————————————————————————————————————————————— 
-st.header("a) Mostrar filas") 
-mostrar_todas = st.checkbox("Mostrar todas las filas", value=False) 
-if mostrar_todas: 
-    st.dataframe(df, use_container_width=True) 
-else: 
-    st.dataframe(df.head(25), use_container_width=True) 
+# a) Mostrar filas
+st.header("a) Mostrar filas")
+mostrar_todas = st.checkbox("Mostrar todas las filas", value=False)
+if mostrar_todas:
+    st.dataframe(df, use_container_width=True)
+else:
+    st.dataframe(df.head(25), use_container_width=True)
 
-# ——————————————————————————————————————————————— 
-# b) Mostrar todas las columnas del dataset 
-# ——————————————————————————————————————————————— 
-st.header("b) Mostrar columnas") 
-with st.expander("Vista de columnas"): 
-    st.write(list(df.columns)) 
-st.caption("Usa el scroll horizontal de la tabla para ver todas las columnas en pantalla.") 
+# b) Mostrar columnas
+st.header("b) Mostrar columnas")
+with st.expander("Vista de columnas"):
+    st.write(list(df.columns))
+st.caption("Usa el scroll horizontal de la tabla para ver todas las columnas en pantalla.")
 
-# ——————————————————————————————————————————————— 
-# c) Línea del total de fallecidos (>2500) vs Confirmed/Recovered/Active por país 
-# ——————————————————————————————————————————————— 
-st.header("c) Gráfica de líneas por país (muertes > 2500)") 
-C, D = cols["confirmed"], cols["deaths"] 
-R, A = cols["recovered"], cols["active"] 
-metrics = [m for m in [C, D, R, A] if m and m in df.columns] 
-base = df[[cols["country"]] + metrics].copy() 
-base = base.rename(columns={cols["country"]: "Country_Region"}) 
-filtrado = base.loc[base[D] > 2500] 
-agr = filtrado.groupby("Country_Region").sum(numeric_only=True) 
-orden = agr.sort_values(D) 
-if not orden.empty: 
-    st.line_chart(orden[[c for c in [C, R, A] if c in orden.columns]]) 
+# c) Gráfica de líneas (muertes > 2500)
+st.header("c) Gráfica de líneas por país (muertes > 2500)")
+lower = {c.lower(): c for c in df.columns}
+C = lower.get("confirmed", "Confirmed")
+D = lower.get("deaths", "Deaths")
+R = lower.get("recovered", "Recovered")
+A = lower.get("active", "Active")
 
-# ——————————————————————————————————————————————— 
-# d) Barras de fallecidos de estados de Estados Unidos 
-# ——————————————————————————————————————————————— 
-st.header("d) Barras: fallecidos por estado de EE.UU.") 
-country_col = cols["country"] 
-prov_col = cols["province"] 
-dfu = df[df[country_col] == "US"] 
-if len(dfu) == 0: 
-    st.info("Para esta fecha no hay registros con Country_Region='US'.") 
-else: 
-    agg_us = dfu.groupby(prov_col)[D].sum(numeric_only=True).sort_values(ascending=False) 
-    top_n = st.slider("Top estados por fallecidos", 5, 50, 20) 
-    st.bar_chart(agg_us.head(top_n)) 
+metrics = [m for m in [C, D, R, A] if m in df.columns]
+base = df[[lower.get("country_region", "Country_Region")] + metrics].copy()
+base = base.rename(columns={lower.get("country_region", "Country_Region"): "Country_Region"})
+filtrado = base.loc[base[D] > 2500]
+agr = filtrado.groupby("Country_Region").sum(numeric_only=True)
+orden = agr.sort_values(D)
+if not orden.empty:
+    st.line_chart(orden[[c for c in [C, R, A] if c in orden.columns]])
 
-# ——————————————————————————————————————————————— 
-# e) Gráfica de sectores (simulada con barra si no hay pie nativo) 
-# ——————————————————————————————————————————————— 
-st.header("e) Gráfica de sectores (simulada)") 
-lista_paises = ["Colombia", "Chile", "Peru", "Argentina", "Mexico"] 
-sel = st.multiselect("Países", sorted(df[country_col].unique().tolist()), default=lista_paises) 
-agg_latam = df[df[country_col].isin(sel)].groupby(country_col)[D].sum(numeric_only=True) 
-if agg_latam.sum() > 0: 
-    st.write("Participación de fallecidos") 
-    st.dataframe(agg_latam) 
-    # Como Streamlit no tiene pie nativo, mostramos distribución normalizada como barra 
-    normalized = agg_latam / agg_latam.sum() 
-    st.bar_chart(normalized) 
-else: 
-    st.warning("Sin datos para los países seleccionados") 
+# d) Barras: fallecidos por estado de EE.UU.
+st.header("d) Barras: fallecidos por estado de EE.UU.")
+country_col = lower.get("country_region", "Country_Region")
+prov_col = lower.get("province_state", "Province_State")
+dfu = df[df[country_col] == "US"]
+if len(dfu) == 0:
+    st.info("Para esta fecha no hay registros con Country_Region='US'.")
+else:
+    agg_us = dfu.groupby(prov_col)[D].sum(numeric_only=True).sort_values(ascending=False)
+    top_n = st.slider("Top estados por fallecidos", 5, 50, 20)
+    st.bar_chart(agg_us.head(top_n))
 
-# ——————————————————————————————————————————————— 
-# f) Histograma del total de fallecidos por país (simulado con bar_chart) 
-# ——————————————————————————————————————————————— 
-st.header("f) Histograma de fallecidos por país") 
-muertes_pais = df.groupby(country_col)[D].sum(numeric_only=True) 
-st.bar_chart(muertes_pais) 
+# e) Simulación de gráfico de sectores (barra)
+st.header("e) Gráfica de sectores (simulada)")
+lista_paises = ["Colombia", "Chile", "Peru", "Argentina", "Mexico"]
+sel = st.multiselect("Países", sorted(df[country_col].unique().tolist()), default=lista_paises)
+agg_latam = df[df[country_col].isin(sel)].groupby(country_col)[D].sum(numeric_only=True)
+if agg_latam.sum() > 0:
+    st.write("Participación de fallecidos")
+    st.dataframe(agg_latam)
+    normalized = agg_latam / agg_latam.sum()
+    st.bar_chart(normalized)
+else:
+    st.warning("Sin datos para los países seleccionados")
 
-# ——————————————————————————————————————————————— 
-# g) Boxplot de Confirmed, Deaths, Recovered, Active (simulado con box_chart) 
-# ——————————————————————————————————————————————— 
-st.header("g) Boxplot (simulado)") 
-cols_box = [c for c in [C, D, R, A] if c and c in df.columns] 
-subset = df[cols_box].fillna(0) 
-subset_plot = subset.head(25) 
-# Streamlit no tiene boxplot nativo, así que mostramos estadísticas resumen en tabla 
-st.write("Resumen estadístico (simulación de boxplot):") 
-st.dataframe(subset_plot.describe().T) 
+# f) Histograma de fallecidos por país
+st.header("f) Histograma de fallecidos por país")
+muertes_pais = df.groupby(country_col)[D].sum(numeric_only=True)
+st.bar_chart(muertes_pais)
 
-# ——————————————————————————————————————————————— 
-# PARTE 2: Estadística descriptiva y avanzada 
-# ——————————————————————————————————————————————— 
-st.header("PARTE 2 – Estadística descriptiva y avanzada") 
-# Título principal de esta sección en la app 
+# g) Boxplot simulado
+st.header("g) Boxplot (simulado)")
+cols_box = [c for c in [C, D, R, A] if c in df.columns]
+subset = df[cols_box].fillna(0)
+subset_plot = subset.head(25)
+st.write("Resumen estadístico (simulación de boxplot):")
+st.dataframe(subset_plot.describe().T)
 
-# 1. Métricas clave 
-st.subheader("1. Métricas clave por país") # Subtítulo para las métricas básicas 
-agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]] # Agrupar por país y sumar confirmados y muertes 
-agg["CFR"] = agg[D] / agg[C] # Calcular CFR (muertes/confirmados) 
+# PARTE 2 – Estadística descriptiva y avanzada
+st.header("PARTE 2 – Estadística descriptiva y avanzada")
 
-# Si existe la columna Incident_Rate en el dataset 
-if "Incident_Rate" in df.columns: 
-    # Calcular la tasa de incidencia promedio por país (casos por 100k) 
-    incident = df.groupby(country_col)["Incident_Rate"].mean(numeric_only=True) 
-    # Estimar población a partir de confirmed e incident_rate 
-    poblacion_est = (agg[C] * 100000 / incident).replace([np.inf, -np.inf], np.nan) 
-    # Calcular muertes por 100k habitantes 
-    agg["Deaths_per_100k"] = (agg[D] / poblacion_est) * 100000 
-else: 
-    agg["Deaths_per_100k"] = np.nan # Si no hay incident_rate, asignar NaN 
-    st.info("⚠️ No hay columna 'Incident_Rate' en este reporte, no se puede estimar la tasa por 100k.") 
+# 1. Métricas clave por país
+st.subheader("1. Métricas clave por país")
+agg = df.groupby(country_col).sum(numeric_only=True)[[C, D]]
+agg["CFR"] = agg[D] / agg[C]
+if "Incident_Rate" in df.columns:
+    incident = df.groupby(country_col)["Incident_Rate"].mean(numeric_only=True)
+    poblacion_est = (agg[C] * 100000 / incident).replace([np.inf, -np.inf], np.nan)
+    agg["Deaths_per_100k"] = (agg[D] / poblacion_est) * 100000
+else:
+    agg["Deaths_per_100k"] = np.nan
+    st.info("⚠️ No hay columna 'Incident_Rate' en este reporte.")
 
-st.dataframe(agg.head(50)) # Mostrar primeras 50 filas con métricas 
+st.dataframe(agg.head(50))
 
-# 2. Intervalos de confianza para CFR 
-st.subheader("2. Intervalos de confianza para CFR") # Subtítulo 
-pais_ic = st.selectbox("Seleccionar país", agg.index.tolist()) # Dropdown para elegir país 
-conf = 0.95 # Nivel de confianza 95% 
-n = agg.loc[pais_ic, C] # Confirmados del país elegido 
-x = agg.loc[pais_ic, D] # Fallecidos del país elegido 
-if n > 0: # Solo calcular si hay casos 
-    p_hat = x/n # Proporción de muertes (CFR) 
-    se = np.sqrt(p_hat*(1-p_hat)/n) # Error estándar de la proporción 
-    z = stats.norm.ppf(1-(1-conf)/2) # Valor z para el nivel de confianza 
-    ic_low, ic_high = p_hat - z*se, p_hat + z*se # Intervalo de confianza 
-    st.write(f"CFR de {pais_ic}: {p_hat:.4f} (IC {conf*100:.0f}%: {ic_low:.4f} – {ic_high:.4f})") 
-else: 
-    st.warning("No hay suficientes casos para calcular IC.") 
+# 2. IC para CFR
+st.subheader("2. Intervalos de confianza para CFR")
+pais_ic = st.selectbox("Seleccionar país", agg.index.tolist())
+conf = 0.95
+n = agg.loc[pais_ic, C]
+x = agg.loc[pais_ic, D]
+if n > 0:
+    p_hat = x / n
+    se = np.sqrt(p_hat * (1 - p_hat) / n)
+    z = stats.norm.ppf(1 - (1 - conf) / 2)
+    ic_low, ic_high = p_hat - z * se, p_hat + z * se
+    st.write(f"CFR de {pais_ic}: {p_hat:.4f} (IC {conf*100:.0f}%: {ic_low:.4f} – {ic_high:.4f})")
+else:
+    st.warning("No hay suficientes casos para calcular IC.")
 
-# 3. Test de hipótesis de proporciones 
-st.subheader("3. Test de hipótesis: comparación de CFR entre dos países") 
-pais1 = st.selectbox("País 1", agg.index.tolist(), index=0) # Selección de país 1 
-pais2 = st.selectbox("País 2", agg.index.tolist(), index=1) # Selección de país 2 
-n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D] # Confirmados y muertes país 1 
-n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D] # Confirmados y muertes país 2 
-if n1>0 and n2>0: 
-    p1, p2 = x1/n1, x2/n2 # CFR de cada país 
-    p_pool = (x1+x2)/(n1+n2) # Proporción combinada 
-    se = np.sqrt(p_pool*(1-p_pool)*(1/n1+1/n2)) # Error estándar combinado 
-    z_stat = (p1-p2)/se # Estadístico Z 
-    p_val = 2*(1-stats.norm.cdf(abs(z_stat))) # p-value bilateral 
-    st.write(f"CFR {pais1}: {p1:.4f}, CFR {pais2}: {p2:.4f}") 
-    st.write(f"Z = {z_stat:.3f}, p-value = {p_val:.4g}") 
-else: 
-    st.warning("No hay suficientes casos para comparar.") 
+# 3. Test de hipótesis para CFR
+st.subheader("3. Test de hipótesis: comparación de CFR entre dos países")
+pais1 = st.selectbox("País 1", agg.index.tolist(), index=0)
+pais2 = st.selectbox("País 2", agg.index.tolist(), index=1)
+n1, x1 = agg.loc[pais1, C], agg.loc[pais1, D]
+n2, x2 = agg.loc[pais2, C], agg.loc[pais2, D]
+if n1 > 0 and n2 > 0:
+    p1, p2 = x1 / n1, x2 / n2
+    p_pool = (x1 + x2) / (n1 + n2)
+    se = np.sqrt(p_pool * (1 - p_pool) * (1 / n1 + 1 / n2))
+    z_stat = (p1 - p2) / se
+    p_val = 2 * (1 - stats.norm.cdf(abs(z_stat)))
+    st.write(f"CFR {pais1}: {p1:.4f}, CFR {pais2}: {p2:.4f}")
+    st.write(f"Z = {z_stat:.3f}, p-value = {p_val:.4g}")
+else:
+    st.warning("No hay suficientes casos para comparar.")
 
-# 4. Detección de outliers 
-st.subheader("4. Detección de outliers") # Subtítulo 
-serie = agg[D] # Serie de muertes totales por país 
-z_scores = np.abs(stats.zscore(serie)) # Calcular Z-score de cada país 
-outliers = serie[z_scores > 3] # Detectar valores fuera de 3σ 
-if not outliers.empty: 
-    st.write("Outliers detectados (Z-score > 3):") # Mostrar si hay outliers 
-    st.dataframe(outliers) 
-else: 
-    st.info("No se detectaron outliers.") 
+# 4. Detección de outliers
+st.subheader("4. Detección de outliers")
+serie = agg[D]
+z_scores = np.abs(stats.zscore(serie))
+outliers = serie[z_scores > 3]
+if not outliers.empty:
+    st.write("Outliers detectados (Z-score > 3):")
+    st.dataframe(outliers)
+else:
+    st.info("No se detectaron outliers.")
 
-# 5. Gráfico de control de muertes diarias (3σ) 
-st.subheader("5. Gráfico de control (3σ) de muertes diarias") 
-muertes = df.groupby(country_col)[D].sum(numeric_only=True) # Muertes totales por país 
-media, sigma = muertes.mean(), muertes.std() # Media y desviación estándar 
-lim_sup, lim_inf = media + 3*sigma, max(media - 3*sigma, 0) # Límites superior e inferior (3σ) 
-st.line_chart(muertes) # Gráfico de línea de muertes 
-st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}") 
+# 5. Gráfico de control 3σ
+st.subheader("5. Gráfico de control (3σ) de muertes diarias")
+muertes = df.groupby(country_col)[D].sum(numeric_only=True)
+media, sigma = muertes.mean(), muertes.std()
+lim_sup, lim_inf = media + 3 * sigma, max(media - 3 * sigma, 0)
+st.line_chart(muertes)
+st.write(f"Media: {media:.2f}, Límite inferior: {lim_inf:.2f}, Límite superior: {lim_sup:.2f}")
 
-# ———————————————————————————————————————————————
-# PARTE 3: Series de tiempo y pronósticos
-# ———————————————————————————————————————————————
+# ——————————————————————
+# PARTE 3.1 – Series de tiempo con suavizado 7 días
+# ——————————————————————
 st.header("PARTE 3 – Series de tiempo")
-
-# 3.1. Generar series de tiempo por país con suavizado de 7 días (NUEVO)
 st.subheader("3.1 Series de tiempo por país (suavizado 7 días)")
 
-# Límite superior razonable (último día con reportes JHU)
-max_repo_date = pd.to_datetime("2022-09-09")
-end_default = min(pd.to_datetime(fecha), max_repo_date)
+# Selector país
+paises_ts = sorted(df["Country_Region"].unique().tolist())
+pais_ts = st.selectbox("Selecciona país (series)", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
 
-col_hist_1, col_hist_2 = st.columns(2)
-with col_hist_1:
-    start_hist = st.date_input("Fecha inicial (histórico)", value=pd.to_datetime("2020-03-01"))
-with col_hist_2:
-    end_hist = st.date_input("Fecha final (histórico)", value=end_default)
+df_pais = df[df["Country_Region"] == pais_ts].copy().sort_values("Last_Update")
+df_pais["NewConfirmed"] = df_pais[C].diff().clip(lower=0).fillna(0)
+df_pais["NewDeaths"] = df_pais[D].diff().clip(lower=0).fillna(0)
+df_pais["NewConfirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
+df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
 
-# Cargar histórico estandarizado
-df_hist = load_reports_range(pd.to_datetime(start_hist).strftime("%Y-%m-%d"),
-                             pd.to_datetime(end_hist).strftime("%Y-%m-%d"))
-
-if df_hist.empty:
-    st.warning("No se pudo construir el histórico para el rango dado.")
-else:
-    # Agregar por día y país (acumulados diarios)
-    daily = (
-        df_hist.groupby(["Report_Date","Country_Region"])[["Confirmed","Deaths"]]
-        .sum(numeric_only=True)
-        .reset_index()
-        .sort_values("Report_Date")
-    )
-
-    # Selector de país
-    paises_ts = sorted(daily["Country_Region"].unique().tolist())
-    pais_ts = st.selectbox("Selecciona país (series)", paises_ts, index=(paises_ts.index("Peru") if "Peru" in paises_ts else 0))
-
-    df_pais = daily[daily["Country_Region"] == pais_ts].copy()
-    df_pais = df_pais.set_index("Report_Date").sort_index()
-
-    # Derivar series diarias (diferencia de acumulados)
-    df_pais["NewConfirmed"] = df_pais["Confirmed"].diff().clip(lower=0).fillna(0)
-    df_pais["NewDeaths"] = df_pais["Deaths"].diff().clip(lower=0).fillna(0)
-
-    # Suavizado 7 días
-    df_pais["NewConfirmed_7d"] = df_pais["NewConfirmed"].rolling(7, min_periods=1).mean()
-    df_pais["NewDeaths_7d"] = df_pais["NewDeaths"].rolling(7, min_periods=1).mean()
-
-    # Gráficas
-    c1, c2 = st.columns(2)
-    with c1:
-        st.write(f"{pais_ts} – Nuevos confirmados (diario vs 7d)")
-        st.line_chart(df_pais[["NewConfirmed","NewConfirmed_7d"]])
-    with c2:
-        st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
-        st.line_chart(df_pais[["NewDeaths","NewDeaths_7d"]])
-
-    with st.expander("Ver tabla (últimos 30 días)"):
-        st.dataframe(df_pais[["NewConfirmed","NewConfirmed_7d","NewDeaths","NewDeaths_7d"]].tail(30).round(2))
-
+# Gráficas
+c1, c2 = st.columns(2)
+with c1:
+    st.write(f"{pais_ts} – Nuevos confirmados (diario vs 7d)")
+    st.line_chart(df_pais.set_index("Last_Update")[["NewConfirmed", "NewConfirmed_7d"]])
+with c2:
+    st.write(f"{pais_ts} – Nuevas muertes (diario vs 7d)")
+    st.line_chart(df_pais.set_index("Last_Update")[["NewDeaths", "NewDeaths_7d"]])
