@@ -126,3 +126,56 @@ st.write(f"Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}" 
     st.warning("⚠️ No hay suficientes datos confiables para validar muertes.")
 else:
     st.write(f"- Nuevas muertes → MAE: {mae_muertes:.2f}, MAPE: {mape_muertes:.2%}")
+
+# ——————————————————————
+# PARTE 3.4 – Forecast con intervalos de confianza
+# ——————————————————————
+st.subheader("3.4 Pronóstico con bandas de confianza (14 días)")
+
+modelo_forecast = st.radio("Modelo para forecast:", ["SARIMA", "ETS"], index=0)
+
+# Seleccionamos la serie diaria (casos o muertes)
+serie_casos = df_pais["NewConfirmed"]
+serie_muertes = df_pais["NewDeaths"]
+
+pasos = 14
+
+def forecast_conf(serie, modelo, pasos=14):
+    if modelo == "SARIMA":
+        modelo_fit = SARIMAX(serie, order=(1,1,1), seasonal_order=(1,1,1,7)).fit(disp=False)
+    else:
+        modelo_fit = ExponentialSmoothing(serie, trend="add", seasonal=None).fit()
+
+    pred = modelo_fit.get_forecast(steps=pasos)
+    media = pred.predicted_mean
+    ci = pred.conf_int(alpha=0.05)  # intervalo al 95%
+    return media, ci
+
+# Forecast de casos
+media_casos, ci_casos = forecast_conf(serie_casos, modelo_forecast, pasos)
+# Forecast de muertes
+media_muertes, ci_muertes = forecast_conf(serie_muertes, modelo_forecast, pasos)
+
+import matplotlib.pyplot as plt
+
+# Casos
+fig, ax = plt.subplots()
+ax.plot(serie_casos.index, serie_casos, label="Histórico")
+ax.plot(media_casos.index, media_casos, label="Forecast", color="red")
+ax.fill_between(media_casos.index,
+                ci_casos.iloc[:,0], ci_casos.iloc[:,1],
+                color="pink", alpha=0.3, label="IC 95%")
+ax.legend()
+ax.set_title(f"{pais_ts} – Nuevos casos (Forecast con IC)")
+st.pyplot(fig)
+
+# Muertes
+fig, ax = plt.subplots()
+ax.plot(serie_muertes.index, serie_muertes, label="Histórico")
+ax.plot(media_muertes.index, media_muertes, label="Forecast", color="red")
+ax.fill_between(media_muertes.index,
+                ci_muertes.iloc[:,0], ci_muertes.iloc[:,1],
+                color="pink", alpha=0.3, label="IC 95%")
+ax.legend()
+ax.set_title(f"{pais_ts} – Nuevas muertes (Forecast con IC)")
+st.pyplot(fig)
